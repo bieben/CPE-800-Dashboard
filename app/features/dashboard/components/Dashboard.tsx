@@ -1,5 +1,8 @@
 'use client';
 
+import { useState } from 'react';
+import FedoraDeployForm from './FedoraDeployForm';
+
 const stats = [
   { name: 'Total Models', value: '12' },
   { name: 'Running Models', value: '4' },
@@ -11,9 +14,18 @@ const quickActions = [
   { name: 'Deploy Model', description: 'Deploy a new model to production' },
   { name: 'Monitor Performance', description: 'View model performance metrics' },
   { name: 'Manage Resources', description: 'Adjust resource allocation' },
+  { name: 'Deploy Fedora Server', description: 'Deploy Fedora Server with Ansible' },
 ];
 
 export default function Dashboard() {
+  const [showFedoraForm, setShowFedoraForm] = useState(false);
+
+  const handleActionClick = (actionName: string) => {
+    if (actionName === 'Deploy Fedora Server') {
+      setShowFedoraForm(true);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Stats Section */}
@@ -40,6 +52,7 @@ export default function Dashboard() {
             <button
               key={action.name}
               className="action-button"
+              onClick={() => handleActionClick(action.name)}
             >
               <h3 className="action-title">
                 {action.name}
@@ -51,6 +64,13 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* Fedora Deployment Form */}
+      {showFedoraForm && (
+        <div className="mt-8">
+          <FedoraDeployForm />
+        </div>
+      )}
 
       {/* Recent Activity Section */}
       <div className="mt-12">

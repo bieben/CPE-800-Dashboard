@@ -157,6 +157,12 @@ export default function Home() {
               actionText="View Analytics"
               href="/analytics"
             />
+            <ActionCard
+              title="Deploy Fedora Server"
+              description="Deploy Fedora Server with Ansible"
+              actionText="Deploy Fedora"
+              href="/deploy/fedora"
+            />
           </div>
         </div>
 
