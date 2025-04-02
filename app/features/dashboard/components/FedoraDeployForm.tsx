@@ -17,7 +17,7 @@ export default function FedoraDeployForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await fetch('/deploy/fedora', {
+      const response = await fetch('/api/deploy/fedora', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -25,28 +25,41 @@ export default function FedoraDeployForm() {
         body: JSON.stringify(formData)
       });
 
-      const result = await response.json();
+      // Check if the response is JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const result = await response.json();
 
-      if (response.ok) {
-        setStatus({
-          type: 'success',
-          message: 'Fedora Server deployed successfully! Redirecting to Jupyter Notebook...'
-        });
-        // Redirect to Jupyter after 2 seconds
-        setTimeout(() => {
-          // Ensure the server IP is properly formatted
-          const serverIp = formData.server_ip.trim();
-          const jupyterUrl = `http://${serverIp}:8080`;
-          console.log(`Redirecting to: ${jupyterUrl}`);
-          window.location.href = jupyterUrl;
-        }, 2000);
+        if (response.ok) {
+          setStatus({
+            type: 'success',
+            message: 'Fedora Server deployed successfully! Redirecting to Jupyter Notebook...'
+          });
+          // Redirect to Jupyter after 2 seconds
+          setTimeout(() => {
+            // Ensure the server IP is properly formatted
+            const serverIp = formData.server_ip.trim();
+            const jupyterUrl = `http://${serverIp}:8080`;
+            console.log(`Redirecting to: ${jupyterUrl}`);
+            window.location.href = jupyterUrl;
+          }, 2000);
+        } else {
+          setStatus({
+            type: 'error',
+            message: `Error: ${result.error || 'Unknown error occurred'}`
+          });
+        }
       } else {
+        // Handle non-JSON response
+        const text = await response.text();
+        console.error('Non-JSON response:', text);
         setStatus({
           type: 'error',
-          message: `Error: ${result.error}`
+          message: 'Server returned an invalid response. Please check the server logs or try again later.'
         });
       }
     } catch (error) {
+      console.error('Deployment error:', error);
       setStatus({
         type: 'error',
         message: `Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`
