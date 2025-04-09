@@ -12,71 +12,45 @@ interface ModelContextType {
 
 const ModelContext = createContext<ModelContextType | undefined>(undefined);
 
-// Mock data - replace with actual API call
-const mockModels: Model[] = [
-  {
-    id: '1',
-    name: 'GPT-3',
-    description: 'Large language model for text generation',
-    status: 'running',
-    type: 'text',
-    version: '1.0.0',
-    lastUpdated: '2024-02-28',
-    metrics: {
-      requests: 1500000,
-      latency: '150ms',
-      accuracy: '98.5%',
-    },
-  },
-  {
-    id: '2',
-    name: 'BERT',
-    description: 'Pre-trained model for natural language understanding',
-    status: 'stopped',
-    type: 'text',
-    version: '2.1.0',
-    lastUpdated: '2024-02-27',
-    metrics: {
-      requests: 800000,
-      latency: '80ms',
-      accuracy: '97.2%',
-    },
-  },
-  {
-    id: '3',
-    name: 'ResNet50',
-    description: 'Convolutional neural network for image classification',
-    status: 'running',
-    type: 'image',
-    version: '1.2.0',
-    lastUpdated: '2024-02-26',
-    metrics: {
-      requests: 500000,
-      latency: '200ms',
-      accuracy: '95.8%',
-    },
-  },
-];
 
 export function ModelProvider({ children }: { children: React.ReactNode }) {
-  const [models, setModels] = useState<Model[]>([]);
+  const [models, setModels] = useState<Model[]>(() => {
+    // Initialize from localStorage if available
+    if (typeof window !== 'undefined') {
+      const savedModels = localStorage.getItem('models');
+      return savedModels ? JSON.parse(savedModels) : [];
+    }
+    return [];
+  });
 
   const addModel = (data: CreateModelData) => {
     const newModel: Model = {
       ...data,
       id: `model-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     };
-    setModels(prev => [...prev, newModel]);
+    setModels(prev => {
+      const updated = [...prev, newModel];
+      localStorage.setItem('models', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const updateModel = (id: string, data: Partial<Model>) => {
-    setModels(prev => prev.map(model => 
-      model.id === id ? { ...model, ...data } : model
-    ));
+    setModels(prev => {
+      const updated = prev.map(model => 
+        model.id === id ? { ...model, ...data } : model
+      );
+      localStorage.setItem('models', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const deleteModel = (id: string) => {
-    setModels(prev => prev.filter(model => model.id !== id));
+    setModels(prev => {
+      const updated = prev.filter(model => model.id !== id);
+      localStorage.setItem('models', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   return (
