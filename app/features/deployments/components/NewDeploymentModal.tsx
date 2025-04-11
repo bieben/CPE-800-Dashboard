@@ -27,7 +27,7 @@ export default function NewDeploymentModal({
   // Check model status
   const checkModelStatus = async (modelName: string) => {
     try {
-      const response = await fetch(`http://127.0.0.1:5000/model/status?model_name=${modelName}&environment=${environment}`, {
+      const response = await fetch(`http://localhost:5000/model/status?model_name=${modelName}&environment=${environment}`, {
         method: 'GET',
       });
 
