@@ -21,12 +21,68 @@ export default function NewDeploymentModal({
   const { models } = useModels();
   const [selectedModel, setSelectedModel] = useState('');
   const [environment, setEnvironment] = useState<DeploymentEnvironment>(availableEnvironments[0]);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Check model status
+  const checkModelStatus = async (modelName: string) => {
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/model/status?model_name=${modelName}&environment=${environment}`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to check model status');
+      }
+
+      const data = await response.json();
+      setStatus(data.status);
+      return data.status;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to check model status');
+      return null;
+    }
+  };
+
+  // When the selected model changes, check its status
+  const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const modelId = e.target.value;
+    setSelectedModel(modelId);
+    setError(null);
+    setStatus(null);
+
+    if (modelId) {
+      const model = models.find(m => m.id === modelId);
+      if (model) {
+        await checkModelStatus(model.name);
+      }
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedModel) {
-      onDeploy(selectedModel, environment);
-      onClose();
+    if (!selectedModel) return;
+
+    try {
+      const model = models.find(m => m.id === selectedModel);
+      if (!model) {
+        throw new Error('Model not found');
+      }
+
+      const currentStatus = await checkModelStatus(model.name);
+      
+      if (currentStatus === 'Deployed') {
+        onDeploy(selectedModel, environment);
+        onClose();
+      } else if (currentStatus === 'Model Not Found') {
+        setError('Model not found in the system');
+      } else if (currentStatus === 'No notebook found for model') {
+        setError('Model files are missing');
+      } else {
+        setError('Model is not ready for deployment');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to deploy model');
     }
   };
 
@@ -72,7 +128,7 @@ export default function NewDeploymentModal({
                       <select
                         id="model"
                         value={selectedModel}
-                        onChange={(e) => setSelectedModel(e.target.value)}
+                        onChange={handleModelChange}
                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                         required
                       >
@@ -103,6 +159,21 @@ export default function NewDeploymentModal({
                     </div>
                   </div>
 
+                  {status && (
+                    <div className="mt-4 text-sm">
+                      <span className="font-medium">Status:</span>{' '}
+                      <span className={status === 'Deployed' ? 'text-green-600' : 'text-yellow-600'}>
+                        {status}
+                      </span>
+                    </div>
+                  )}
+
+                  {error && (
+                    <div className="mt-4 text-sm text-red-600">
+                      {error}
+                    </div>
+                  )}
+
                   <div className="mt-6 flex justify-end space-x-3">
                     <button
                       type="button"
@@ -113,7 +184,12 @@ export default function NewDeploymentModal({
                     </button>
                     <button
                       type="submit"
-                      className="inline-flex justify-center rounded-md border border-transparent bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
+                      disabled={status !== 'Deployed'}
+                      className={`inline-flex justify-center rounded-md border border-transparent px-4 py-2 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                        status === 'Deployed'
+                          ? 'bg-primary-600 hover:bg-primary-700'
+                          : 'bg-gray-400 cursor-not-allowed'
+                      }`}
                     >
                       Deploy
                     </button>
@@ -126,4 +202,4 @@ export default function NewDeploymentModal({
       </Dialog>
     </Transition>
   );
-} 
+}
