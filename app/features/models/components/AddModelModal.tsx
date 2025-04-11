@@ -25,8 +25,8 @@ export default function AddModelModal({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (!selectedFile.name.endsWith('.joblib')) {
-        setError('Only .joblib files are supported');
+      if (!selectedFile.name.endsWith('.ipynb')) {
+        setError('Only .ipynb files are supported');
         return;
       }
       setFile(selectedFile);
@@ -131,11 +131,11 @@ export default function AddModelModal({
                 <form onSubmit={handleSubmit} className="mt-4 space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
-                      Model File (.joblib)
+                      Model File (.ipynb)
                     </label>
                     <input
                       type="file"
-                      accept=".joblib"
+                      accept=".ipynb"
                       onChange={handleFileChange}
                       className="mt-1 block w-full text-sm text-gray-500
                         file:mr-4 file:py-2 file:px-4
