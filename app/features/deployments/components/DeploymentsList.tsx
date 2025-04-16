@@ -22,6 +22,7 @@ export default function DeploymentsList() {
       setLoading(true);
       setError(null);
 
+      // 获取部署状态
       const deploymentPromises = models.map(async (model) => {
         try {
           const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}&environment=development`);
@@ -30,14 +31,20 @@ export default function DeploymentsList() {
           }
           const data = await response.json();
           
+          if (data.status === 'not_deployed') {
+            return null;
+          }
+          
           const deploymentId = `${model.id}-development`;
           const existingDeployment = deployments.find(d => d.id === deploymentId);
           
           if (existingDeployment) {
-            updateDeployment(deploymentId, {
-              status: data.status,
-              lastUpdated: new Date().toISOString()
-            });
+            if (existingDeployment.status !== data.status) {
+              updateDeployment(deploymentId, {
+                status: data.status,
+                lastUpdated: new Date().toISOString()
+              });
+            }
             return null;
           }
           
@@ -73,7 +80,10 @@ export default function DeploymentsList() {
       
       // 只添加新的部署
       results.forEach(deployment => {
-        addDeployment(deployment);
+        const existingDeployment = deployments.find(d => d.id === deployment.id);
+        if (!existingDeployment) {
+          addDeployment(deployment);
+        }
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch deployments');
@@ -82,11 +92,9 @@ export default function DeploymentsList() {
     }
   };
 
-  // Initial load and periodic refresh
+  // Initial load
   useEffect(() => {
     fetchDeployments();
-    const interval = setInterval(fetchDeployments, 30000);
-    return () => clearInterval(interval);
   }, [models]);
 
   // Get available environments based on user role
@@ -167,7 +175,14 @@ export default function DeploymentsList() {
               )}
             </p>
           </div>
-          <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+          <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
+            <button
+              type="button"
+              onClick={() => fetchDeployments()}
+              className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+            >
+              Refresh
+            </button>
             <button
               type="button"
               onClick={() => setIsNewDeploymentModalOpen(true)}
@@ -204,8 +219,8 @@ export default function DeploymentsList() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {deployments.map((deployment) => (
-                    <tr key={`${deployment.id}-${deployment.lastUpdated}`}>
+                  {deployments.map((deployment, index) => (
+                    <tr key={`${deployment.id}-${index}`}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm">
                         <div className="font-medium text-gray-900">{deployment.modelName}</div>
                         <div className="text-gray-500">{deployment.description}</div>
