@@ -72,17 +72,31 @@ export default function AddModelModal({
 
       const uploadData = await uploadResponse.json();
 
-      // Check deployment status
-      const statusResponse = await fetch(`http://10.156.115.33:5000/model/status?model_name=${name}&environment=Development`);
-      const statusData = await statusResponse.json();
-      
+      // Wait for deployment status to be ready
+      let status = 'Pending';
+      let retries = 0;
+      const maxRetries = 10;
+
+      while (retries < maxRetries) {
+        const statusResponse = await fetch(`http://10.156.115.33:5000/model/status?model_name=${name}&environment=Development`);
+        const statusData = await statusResponse.json();
+        status = statusData.status;
+
+        if (status === 'Deployed') {
+          break;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        retries++;
+      }
+
       // Call onAdd with the model data and status
       onAdd({
         name: name || uploadData.model_name,
         description,
         version,
         file,
-        status: statusData.status || 'Pending'  // Include status in model data
+        status: status
       });
 
       onClose();

@@ -86,6 +86,11 @@ export default function NewDeploymentModal({
       while (retries < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}&environment=${environment}`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to check deployment status');
+        }
+
         const data = await response.json();
         deploymentStatus = data.status;
         setStatus(deploymentStatus);

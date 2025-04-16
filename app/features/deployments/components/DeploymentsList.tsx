@@ -1,20 +1,79 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import RoleGuard from '@/features/shared/components/RoleGuard';
 import { useDeployments } from '../context/DeploymentContext';
 import { useModels } from '@/features/models/context/ModelContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import NewDeploymentModal from './NewDeploymentModal';
-import type { DeploymentEnvironment } from '../types';
+import type { DeploymentEnvironment, Deployment } from '../types';
 
 export default function DeploymentsList() {
   const { models } = useModels();
   const { deployments, addDeployment, deleteDeployment } = useDeployments();
   const { user } = useAuth();
   const [isNewDeploymentModalOpen, setIsNewDeploymentModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // 根据用户角色获取可用的环境
+  // Function to fetch deployment status
+  const fetchDeployments = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Clear existing deployments
+      deployments.forEach(deployment => {
+        deleteDeployment(deployment.id);
+      });
+
+      // Get deployment status for each model
+      const deploymentPromises = models.map(async (model) => {
+        try {
+          const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}&environment=development`);
+          if (!response.ok) {
+            throw new Error('Failed to fetch deployment status');
+          }
+          const data = await response.json();
+          
+          return {
+            id: `${model.id}-development-${Date.now()}`,
+            modelId: model.id,
+            modelName: model.name,
+            environment: 'development',
+            status: data.status,
+            version: model.version,
+            createdAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString(),
+            description: `Deployment of ${model.name} in development environment`,
+          };
+        } catch (err) {
+          console.error(`Failed to fetch status for model ${model.name}:`, err);
+          return null;
+        }
+      });
+
+      const results = (await Promise.all(deploymentPromises)).filter((d): d is NonNullable<typeof d> => d !== null);
+      
+      // Update deployments in context
+      results.forEach(deployment => {
+        addDeployment(deployment as Deployment);
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch deployments');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial load and periodic refresh
+  useEffect(() => {
+    fetchDeployments();
+    const interval = setInterval(fetchDeployments, 30000);
+    return () => clearInterval(interval);
+  }, [models, addDeployment, deleteDeployment]);
+
+  // Get available environments based on user role
   const getAvailableEnvironments = (userRole: string): DeploymentEnvironment[] => {
     switch (userRole) {
       case 'admin':
@@ -30,7 +89,7 @@ export default function DeploymentsList() {
     const model = models.find(m => m.id === modelId);
     if (!model) return;
 
-    // 检查用户是否有权限在选定环境中部署
+    // Check if the user has permission to deploy to the selected environment
     const availableEnvironments = getAvailableEnvironments(user?.role || 'user');
     if (!availableEnvironments.includes(environment)) {
       alert('You do not have permission to deploy to this environment');
@@ -66,7 +125,7 @@ export default function DeploymentsList() {
     const deployment = deployments.find(d => d.id === deploymentId);
     if (!deployment) return;
 
-    // 检查用户是否有权限删除此部署
+    // Check if user has permission to delete this deployment
     if (user?.role === 'user' && deployment.environment !== 'development') {
       alert('You can only delete deployments in the development environment');
       return;
