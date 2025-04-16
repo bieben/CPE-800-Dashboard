@@ -22,9 +22,6 @@ export default function DeploymentsList() {
       setLoading(true);
       setError(null);
 
-      // 使用 Set 去重
-      const existingIds = new Set(deployments.map(d => d.id));
-      
       const deploymentPromises = models.map(async (model) => {
         try {
           const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}&environment=development`);
@@ -34,8 +31,9 @@ export default function DeploymentsList() {
           const data = await response.json();
           
           const deploymentId = `${model.id}-development`;
-          if (existingIds.has(deploymentId)) {
-            // 如果已存在，更新而不是添加
+          const existingDeployment = deployments.find(d => d.id === deploymentId);
+          
+          if (existingDeployment) {
             updateDeployment(deploymentId, {
               status: data.status,
               lastUpdated: new Date().toISOString()
