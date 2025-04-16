@@ -97,7 +97,7 @@ export default function DeploymentsList() {
     }
 
     const newDeployment = {
-      id: `${modelId}-${environment}-${Date.now()}`,
+      id: `${modelId}-${environment}`,
       modelId,
       modelName: model.name,
       environment,
