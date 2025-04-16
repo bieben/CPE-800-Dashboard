@@ -59,7 +59,7 @@ export default function AddModelModal({
       formData.append('model_version', version);
       formData.append('model_file', file);
 
-      const response = await fetch('http://localhost:5000/model/upload', {
+      const response = await fetch('http://10.156.115.33:5000/model/upload', {
         method: 'POST',
         body: formData,
       });
