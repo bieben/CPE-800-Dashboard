@@ -1,9 +1,9 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { useModels } from '@/features/models/context/ModelContext';
-import type { DeploymentEnvironment } from '../types';
+import type { DeploymentEnvironment, Deployment } from '../types';
 
 interface NewDeploymentModalProps {
   isOpen: boolean;
@@ -23,6 +23,8 @@ export default function NewDeploymentModal({
   const [environment, setEnvironment] = useState<DeploymentEnvironment>(availableEnvironments[0]);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Check model status
   const checkModelStatus = async (modelName: string) => {
@@ -69,11 +71,30 @@ export default function NewDeploymentModal({
         throw new Error('Model not found');
       }
 
+      // Check model status first
       const currentStatus = await checkModelStatus(model.name);
       
-      if (currentStatus === 'Deployed') {
+      if (currentStatus === 'Deployed' || currentStatus === 'Pending') {
+        // Execute deployment
         onDeploy(selectedModel, environment);
-        onClose();
+        
+        // Wait for deployment to complete
+        let deploymentStatus = 'Pending';
+        let retries = 0;
+        const maxRetries = 10;  // Maximum number of retries
+
+        while (deploymentStatus === 'Pending' && retries < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 2000));  // Wait for 2 seconds
+          const status = await checkModelStatus(model.name);
+          deploymentStatus = status;
+          retries++;
+        }
+
+        if (deploymentStatus === 'Deployed') {
+          onClose();
+        } else {
+          setError('Deployment timeout or failed');
+        }
       } else if (currentStatus === 'Model Not Found') {
         setError('Model not found in the system');
       } else if (currentStatus === 'No notebook found for model') {
@@ -85,6 +106,51 @@ export default function NewDeploymentModal({
       setError(err instanceof Error ? err.message : 'Failed to deploy model');
     }
   };
+
+  // Get deployments
+  const fetchDeployments = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Get deployment status for each model
+      const deploymentPromises = models.map(async (model) => {
+        try {
+          const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}`);
+          if (!response.ok) {
+            throw new Error('Failed to fetch deployment status');
+          }
+          const data = await response.json();
+          
+          return {
+            id: model.id,
+            modelId: model.id,
+            environment: 'Development',
+            status: data.status,
+            createdAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString()
+          };
+        } catch (err) {
+          console.error(`Failed to fetch status for model ${model.name}:`, err);
+          return null;
+        }
+      });
+
+      const results = await Promise.all(deploymentPromises);
+      setDeployments(results.filter((d): d is Deployment => d !== null));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch deployments');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial load and periodic refresh
+  useEffect(() => {
+    fetchDeployments();
+    const interval = setInterval(fetchDeployments, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+  }, [models]);
 
   return (
     <Transition appear show={isOpen} as={Fragment}>
