@@ -10,7 +10,7 @@ import type { DeploymentEnvironment, Deployment } from '../types';
 
 export default function DeploymentsList() {
   const { models } = useModels();
-  const { deployments, addDeployment, deleteDeployment } = useDeployments();
+  const { deployments, addDeployment, deleteDeployment, updateDeployment } = useDeployments();
   const { user } = useAuth();
   const [isNewDeploymentModalOpen, setIsNewDeploymentModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -22,42 +22,55 @@ export default function DeploymentsList() {
       setLoading(true);
       setError(null);
 
-      // Clear existing deployments
-      deployments.forEach(deployment => {
-        deleteDeployment(deployment.id);
-      });
-
-      // Get deployment status for each model
+      // 使用 Set 去重
+      const existingIds = new Set(deployments.map(d => d.id));
+      
       const deploymentPromises = models.map(async (model) => {
-        try {
-          const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}&environment=development`);
-          if (!response.ok) {
-            throw new Error('Failed to fetch deployment status');
-          }
-          const data = await response.json();
-          
-          return {
-            id: `${model.name}-development`,
-            modelId: model.id,
-            modelName: model.name,
-            environment: 'development',
+        const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}&environment=development`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch deployment status');
+        }
+        const data = await response.json();
+        
+        const deploymentId = `${model.id}-development`;
+        if (existingIds.has(deploymentId)) {
+          // 如果已存在，更新而不是添加
+          updateDeployment(deploymentId, {
             status: data.status,
-            version: model.version,
-            createdAt: new Date().toISOString(),
-            lastUpdated: new Date().toISOString(),
-            description: `Deployment of ${model.name} in development environment`,
-          };
-        } catch (err) {
-          console.error(`Failed to fetch status for model ${model.name}:`, err);
+            lastUpdated: new Date().toISOString()
+          });
           return null;
         }
+        
+        return {
+          id: `${model.id}-development`,
+          modelId: model.id,
+          modelName: model.name,
+          environment: 'development' as DeploymentEnvironment,
+          status: data.status,
+          version: model.version,
+          createdAt: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+          description: `Deployment of ${model.name} in development environment`,
+          resources: {
+            cpu: '2 cores',
+            memory: '8GB',
+            gpu: 'N/A'
+          },
+          metrics: {
+            uptime: '0%',
+            requests: 0,
+            latency: '0ms'
+          }
+        };
       });
 
-      const results = (await Promise.all(deploymentPromises)).filter((d): d is NonNullable<typeof d> => d !== null);
+      const results = (await Promise.all(deploymentPromises))
+        .filter((d): d is NonNullable<typeof d> => d !== null);
       
-      // Update deployments in context
+      // Onl
       results.forEach(deployment => {
-        addDeployment(deployment as Deployment);
+        addDeployment(deployment);
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch deployments');
@@ -97,7 +110,7 @@ export default function DeploymentsList() {
     }
 
     const newDeployment = {
-      id: `${model.name}-${environment}`,
+      id: `${model.id}-${environment}`,
       modelId,
       modelName: model.name,
       environment,

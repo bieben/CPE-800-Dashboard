@@ -4,6 +4,7 @@ import { Fragment, useState, useEffect } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { useModels } from '@/features/models/context/ModelContext';
 import type { DeploymentEnvironment, Deployment } from '../types';
+import { useDeployments } from '../context/DeploymentContext';
 
 interface NewDeploymentModalProps {
   isOpen: boolean;
@@ -19,11 +20,11 @@ export default function NewDeploymentModal({
   availableEnvironments,
 }: NewDeploymentModalProps) {
   const { models } = useModels();
+  const { deployments } = useDeployments();
   const [selectedModel, setSelectedModel] = useState('');
   const [environment, setEnvironment] = useState<DeploymentEnvironment>(availableEnvironments[0]);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Check model status
@@ -126,13 +127,23 @@ export default function NewDeploymentModal({
           const data = await response.json();
           
           return {
-            id: `${model.name}-${environment}`,
+            id: `${model.id}-${environment}`,
             modelId: model.id,
             modelName: model.name,
-            environment: 'Development',
+            environment: environment.toLowerCase() as DeploymentEnvironment,
             status: data.status,
             createdAt: new Date().toISOString(),
-            lastUpdated: new Date().toISOString()
+            lastUpdated: new Date().toISOString(),
+            resources: {
+              cpu: '2 cores',
+              memory: '8GB',
+              gpu: 'N/A'
+            },
+            metrics: {
+              uptime: '0%',
+              requests: 0,
+              latency: '0ms'
+            }
           };
         } catch (err) {
           console.error(`Failed to fetch status for model ${model.name}:`, err);
@@ -141,7 +152,6 @@ export default function NewDeploymentModal({
       });
 
       const results = await Promise.all(deploymentPromises);
-      setDeployments(results.filter((d): d is Deployment => d !== null));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch deployments');
     } finally {
