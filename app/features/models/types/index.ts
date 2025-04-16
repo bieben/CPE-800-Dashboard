@@ -21,6 +21,7 @@ export interface AddModelData {
   description: string;
   version: string;
   file?: File;
+  status?: string;
 }
 
 export interface UpdateModelData {

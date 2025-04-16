@@ -71,36 +71,34 @@ export default function NewDeploymentModal({
         throw new Error('Model not found');
       }
 
-      // Check model status first
-      const currentStatus = await checkModelStatus(model.name);
-      
-      if (currentStatus === 'Deployed' || currentStatus === 'Pending') {
-        // Execute deployment
-        onDeploy(selectedModel, environment);
-        
-        // Wait for deployment to complete
-        let deploymentStatus = 'Pending';
-        let retries = 0;
-        const maxRetries = 10;  // Maximum number of retries
+      // Reset status before deployment
+      setStatus(null);
+      setError(null);
 
-        while (deploymentStatus === 'Pending' && retries < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 2000));  // Wait for 2 seconds
-          const status = await checkModelStatus(model.name);
-          deploymentStatus = status;
-          retries++;
-        }
+      // Execute deployment
+      onDeploy(selectedModel, environment);
+      
+      // Check status with model name
+      let deploymentStatus = 'Pending';
+      let retries = 0;
+      const maxRetries = 10;
+
+      while (retries < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}&environment=${environment}`);
+        const data = await response.json();
+        deploymentStatus = data.status;
+        setStatus(deploymentStatus);
 
         if (deploymentStatus === 'Deployed') {
           onClose();
-        } else {
-          setError('Deployment timeout or failed');
+          break;
         }
-      } else if (currentStatus === 'Model Not Found') {
-        setError('Model not found in the system');
-      } else if (currentStatus === 'No notebook found for model') {
-        setError('Model files are missing');
-      } else {
-        setError('Model is not ready for deployment');
+        retries++;
+      }
+
+      if (deploymentStatus !== 'Deployed') {
+        setError('Deployment timeout or failed');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to deploy model');

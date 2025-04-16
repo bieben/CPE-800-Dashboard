@@ -59,24 +59,30 @@ export default function AddModelModal({
       formData.append('model_version', version);
       formData.append('model_file', file);
 
-      const response = await fetch('http://10.156.115.33:5000/model/upload', {
+      // Upload model
+      const uploadResponse = await fetch('http://10.156.115.33:5000/model/upload', {
         method: 'POST',
         body: formData,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
+      if (!uploadResponse.ok) {
+        const errorData = await uploadResponse.json();
         throw new Error(errorData.error || 'Failed to upload model');
       }
 
-      const data = await response.json();
+      const uploadData = await uploadResponse.json();
+
+      // Check deployment status
+      const statusResponse = await fetch(`http://10.156.115.33:5000/model/status?model_name=${name}&environment=Development`);
+      const statusData = await statusResponse.json();
       
-      // Call onAdd with the model data
+      // Call onAdd with the model data and status
       onAdd({
-        name: name || data.model_name,
+        name: name || uploadData.model_name,
         description,
         version,
-        file
+        file,
+        status: statusData.status || 'Pending'  // Include status in model data
       });
 
       onClose();
