@@ -37,7 +37,7 @@ export default function DeploymentsList() {
           const data = await response.json();
           
           return {
-            id: `${model.id}-development-${Date.now()}`,
+            id: `${model.id}-development`,
             modelId: model.id,
             modelName: model.name,
             environment: 'development',
