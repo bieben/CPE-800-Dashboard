@@ -202,7 +202,7 @@ export default function DeploymentsList() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {deployments.map((deployment) => (
-                    <tr key={deployment.id}>
+                    <tr key={`${deployment.id}-${deployment.lastUpdated}`}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm">
                         <div className="font-medium text-gray-900">{deployment.modelName}</div>
                         <div className="text-gray-500">{deployment.description}</div>
