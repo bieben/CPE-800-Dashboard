@@ -37,7 +37,7 @@ export default function DeploymentsList() {
           const data = await response.json();
           
           return {
-            id: `${model.id}-development`,
+            id: `${model.name}-development`,
             modelId: model.id,
             modelName: model.name,
             environment: 'development',
@@ -97,7 +97,7 @@ export default function DeploymentsList() {
     }
 
     const newDeployment = {
-      id: `${modelId}-${environment}`,
+      id: `${model.name}-${environment}`,
       modelId,
       modelName: model.name,
       environment,
