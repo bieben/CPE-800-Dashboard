@@ -126,8 +126,9 @@ export default function NewDeploymentModal({
           const data = await response.json();
           
           return {
-            id: model.id,
+            id: `${model.name}-${environment}`,
             modelId: model.id,
+            modelName: model.name,
             environment: 'Development',
             status: data.status,
             createdAt: new Date().toISOString(),
