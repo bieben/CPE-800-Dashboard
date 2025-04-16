@@ -26,49 +26,54 @@ export default function DeploymentsList() {
       const existingIds = new Set(deployments.map(d => d.id));
       
       const deploymentPromises = models.map(async (model) => {
-        const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}&environment=development`);
-        if (!response.ok) {
-          throw new Error('Failed to fetch deployment status');
-        }
-        const data = await response.json();
-        
-        const deploymentId = `${model.id}-development`;
-        if (existingIds.has(deploymentId)) {
-          // 如果已存在，更新而不是添加
-          updateDeployment(deploymentId, {
+        try {
+          const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}&environment=development`);
+          if (!response.ok) {
+            throw new Error('Failed to fetch deployment status');
+          }
+          const data = await response.json();
+          
+          const deploymentId = `${model.id}-development`;
+          if (existingIds.has(deploymentId)) {
+            // 如果已存在，更新而不是添加
+            updateDeployment(deploymentId, {
+              status: data.status,
+              lastUpdated: new Date().toISOString()
+            });
+            return null;
+          }
+          
+          return {
+            id: deploymentId,
+            modelId: model.id,
+            modelName: model.name,
+            environment: 'development' as DeploymentEnvironment,
             status: data.status,
-            lastUpdated: new Date().toISOString()
-          });
+            version: model.version,
+            createdAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString(),
+            description: `Deployment of ${model.name} in development environment`,
+            resources: {
+              cpu: '2 cores',
+              memory: '8GB',
+              gpu: 'N/A'
+            },
+            metrics: {
+              uptime: '0%',
+              requests: 0,
+              latency: '0ms'
+            }
+          };
+        } catch (err) {
+          console.error(`Failed to fetch status for model ${model.name}:`, err);
           return null;
         }
-        
-        return {
-          id: `${model.id}-development`,
-          modelId: model.id,
-          modelName: model.name,
-          environment: 'development' as DeploymentEnvironment,
-          status: data.status,
-          version: model.version,
-          createdAt: new Date().toISOString(),
-          lastUpdated: new Date().toISOString(),
-          description: `Deployment of ${model.name} in development environment`,
-          resources: {
-            cpu: '2 cores',
-            memory: '8GB',
-            gpu: 'N/A'
-          },
-          metrics: {
-            uptime: '0%',
-            requests: 0,
-            latency: '0ms'
-          }
-        };
       });
 
       const results = (await Promise.all(deploymentPromises))
         .filter((d): d is NonNullable<typeof d> => d !== null);
       
-      // Onl
+      // 只添加新的部署
       results.forEach(deployment => {
         addDeployment(deployment);
       });
@@ -84,7 +89,7 @@ export default function DeploymentsList() {
     fetchDeployments();
     const interval = setInterval(fetchDeployments, 30000);
     return () => clearInterval(interval);
-  }, [models, addDeployment, deleteDeployment]);
+  }, [models]);
 
   // Get available environments based on user role
   const getAvailableEnvironments = (userRole: string): DeploymentEnvironment[] => {
