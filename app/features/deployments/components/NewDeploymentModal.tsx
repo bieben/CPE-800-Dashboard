@@ -3,6 +3,7 @@
 import { Fragment, useState, useEffect } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { useModels } from '@/features/models/context/ModelContext';
+import { useDeployments } from '../context/DeploymentContext';
 import type { DeploymentEnvironment, Deployment } from '../types';
 
 interface NewDeploymentModalProps {
@@ -18,7 +19,8 @@ export default function NewDeploymentModal({
   onDeploy,
   availableEnvironments,
 }: NewDeploymentModalProps) {
-  const { models } = useModels();
+  const { models, updateModel } = useModels();
+  const { updateDeployment } = useDeployments();
   const [selectedModel, setSelectedModel] = useState('');
   const [environment, setEnvironment] = useState<DeploymentEnvironment>(availableEnvironments[0]);
   const [error, setError] = useState<string | null>(null);
@@ -97,11 +99,20 @@ export default function NewDeploymentModal({
             return;
           }
           
-          // Redirect to notebook URL
-          window.location.href = model.notebook_url;
+          // Update deployment status
+          const deploymentId = `${selectedModel}-${environment}-${Date.now()}`;
+          updateDeployment(deploymentId, { status: 'running' });
+          
+          // Update model status
+          updateModel(selectedModel, { status: 'running' });
+          
+          // Open notebook URL in a new tab
+          window.open(model.notebook_url, '_blank');
           onClose();
         } else {
           setError('Deployment timeout or failed');
+          // Update model status to failed if deployment fails
+          updateModel(selectedModel, { status: 'failed' });
         }
       } else if (currentStatus === 'Model Not Found') {
         setError('Model not found in the system');
