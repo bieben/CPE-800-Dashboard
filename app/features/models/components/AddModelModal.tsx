@@ -76,7 +76,8 @@ export default function AddModelModal({
         name: name || data.model_name,
         description,
         version,
-        file
+        file,
+        notebook_url: data.notebook_url
       });
 
       onClose();

@@ -91,6 +91,14 @@ export default function NewDeploymentModal({
         }
 
         if (deploymentStatus === 'Deployed') {
+          // Get the model to access its notebook_url
+          if (!model || !model.notebook_url) {
+            setError('Notebook URL not found');
+            return;
+          }
+          
+          // Redirect to notebook URL
+          window.location.href = model.notebook_url;
           onClose();
         } else {
           setError('Deployment timeout or failed');

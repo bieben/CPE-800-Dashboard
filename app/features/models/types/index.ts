@@ -14,6 +14,7 @@ export interface Model {
   createdBy: string;
   lastUpdated: string;
   metrics: ModelMetrics;
+  notebook_url?: string;
 }
 
 export interface AddModelData {
@@ -21,6 +22,7 @@ export interface AddModelData {
   description: string;
   version: string;
   file?: File;
+  notebook_url?: string;
 }
 
 export interface UpdateModelData {
