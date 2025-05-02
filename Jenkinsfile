@@ -2,48 +2,52 @@ pipeline {
     agent any
 
     environment {
-        BASE_DIR = "/home/aman/Desktop"
-        OLD_DIR = "${BASE_DIR}/CPE-800-Dashboard"
-        BACKUP_DIR = "${BASE_DIR}/prev"
+        REPO_NAME = "CPE-800-Dashboard"
+        BACKUP_DIR = "${WORKSPACE}/prev"
         SERVICE_NAME = "npmapp.service"
         REPO_URL = "https://github.com/bieben/CPE-800-Dashboard.git"
     }
 
     stages {
-        stage('Backup or Remove Old Project') {
+        stage('Backup Existing Repo') {
             steps {
                 script {
-                    if (fileExists(OLD_DIR)) {
+                    if (fileExists("${WORKSPACE}/${REPO_NAME}")) {
                         sh '''
-                            mkdir -p ${BACKUP_DIR}
+                            mkdir -p "$BACKUP_DIR"
                             TIMESTAMP=$(date +%Y%m%d%H%M%S)
-                            mv ${OLD_DIR} ${BACKUP_DIR}/CPE-800-Dashboard-$TIMESTAMP
+                            mv "$REPO_NAME" "$BACKUP_DIR/${REPO_NAME}-$TIMESTAMP"
                         '''
                     }
                 }
             }
         }
 
-        stage('Clone Repo') {
+        stage('Clone Repository') {
             steps {
                 sh '''
-                    echo "Cleaning up ${OLD_DIR} before clone..."
-                    rm -rf ${OLD_DIR}
-                    git clone ${REPO_URL} ${OLD_DIR}
+                    echo "Cleaning up previous repo if exists..."
+                    rm -rf "${REPO_NAME}"
+                    git clone "${REPO_URL}"
                 '''
             }
         }
 
         stage('Install Node Modules') {
             steps {
-                sh "cd ${OLD_DIR} && npm install"
+                dir("${REPO_NAME}") {
+                    sh "npm install"
+                }
             }
         }
 
         stage('Restart Node App') {
             steps {
-                sh "sudo systemctl daemon-reexec"
-                sh "sudo systemctl restart ${SERVICE_NAME}"
+                sh '''
+                    echo "Restarting Node service..."
+                    sudo systemctl daemon-reexec
+                    sudo systemctl restart "$SERVICE_NAME"
+                '''
             }
         }
     }
