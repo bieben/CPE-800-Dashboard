@@ -20,12 +20,12 @@ export default function NewDeploymentModal({
   availableEnvironments,
 }: NewDeploymentModalProps) {
   const { models, updateModel } = useModels();
-  const { updateDeployment } = useDeployments();
+  const { updateDeployment, deployments } = useDeployments();
   const [selectedModel, setSelectedModel] = useState('');
   const [environment, setEnvironment] = useState<DeploymentEnvironment>(availableEnvironments[0]);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [deploymentList, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Check model status
@@ -101,7 +101,10 @@ export default function NewDeploymentModal({
           
           // Update deployment status
           const deploymentId = `${selectedModel}-${environment}-${Date.now()}`;
-          updateDeployment(deploymentId, { status: 'running' });
+          const deployment = deployments.find(d => d.modelId === selectedModel && d.environment === environment);
+          if (deployment) {
+            updateDeployment(deployment.id, { status: 'running' });
+          }
           
           // Update model status
           updateModel(selectedModel, { status: 'running' });
@@ -111,7 +114,12 @@ export default function NewDeploymentModal({
           onClose();
         } else {
           setError('Deployment timeout or failed');
-          // Update model status to failed if deployment fails
+          // Update deployment status to failed
+          const deployment = deployments.find(d => d.modelId === selectedModel && d.environment === environment);
+          if (deployment) {
+            updateDeployment(deployment.id, { status: 'failed' });
+          }
+          // Update model status to failed
           updateModel(selectedModel, { status: 'failed' });
         }
       } else if (currentStatus === 'Model Not Found') {
