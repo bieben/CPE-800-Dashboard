@@ -13,20 +13,37 @@ interface DeploymentContextType {
 const DeploymentContext = createContext<DeploymentContextType>(null!);
 
 export function DeploymentProvider({ children }: { children: ReactNode }) {
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [deployments, setDeployments] = useState<Deployment[]>(() => {
+    // Initialize from localStorage if available
+    if (typeof window !== 'undefined') {
+      const savedDeployments = localStorage.getItem('deployments');
+      return savedDeployments ? JSON.parse(savedDeployments) : [];
+    }
+    return [];
+  });
 
   const addDeployment = (deployment: Deployment) => {
-    setDeployments(prev => [...prev, deployment]);
+    setDeployments(prev => {
+      const updated = [...prev, deployment];
+      localStorage.setItem('deployments', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const updateDeployment = (id: string, deployment: Partial<Deployment>) => {
-    setDeployments(prev =>
-      prev.map(d => (d.id === id ? { ...d, ...deployment } : d))
-    );
+    setDeployments(prev => {
+      const updated = prev.map(d => (d.id === id ? { ...d, ...deployment } : d));
+      localStorage.setItem('deployments', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const deleteDeployment = (id: string) => {
-    setDeployments(prev => prev.filter(d => d.id !== id));
+    setDeployments(prev => {
+      const updated = prev.filter(d => d.id !== id);
+      localStorage.setItem('deployments', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   return (
