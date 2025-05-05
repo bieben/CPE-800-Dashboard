@@ -21,4 +21,18 @@ export interface ModelMetrics {
     uptime: string;
     cost: string;
   };
+  features?: {
+    names: string[];
+    count: number;
+  };
+  predictions?: {
+    total: number;
+    lastPrediction: string;
+    avgLatency: number;
+  };
+  alerts?: {
+    highLatency: boolean;
+    threshold: number;
+    lastAlert: string;
+  };
 } 

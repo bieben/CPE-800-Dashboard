@@ -15,14 +15,18 @@ export interface Model {
   lastUpdated: string;
   metrics: ModelMetrics;
   notebook_url?: string;
+  model_type: 'notebook' | 'pickle';
+  model_id?: string;
 }
 
 export interface AddModelData {
   name: string;
   description: string;
   version: string;
+  model_type: 'notebook' | 'pickle';
   file?: File;
   notebook_url?: string;
+  model_id?: string;
 }
 
 export interface UpdateModelData {

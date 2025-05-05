@@ -19,23 +19,50 @@ export default function ModelsList() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<Model | null>(null);
 
-  const handleDelete = (modelId: string) => {
+  const handleDelete = async (modelId: string) => {
     const model = models.find(m => m.id === modelId);
     if (!model) return;
 
-    // 检查用户是否有权限删除此模型
+    // Check if the user has permission to delete the model
     if (user?.role === 'user' && model.createdBy !== user.email) {
       alert('You do not have permission to delete this model');
       return;
     }
 
     if (window.confirm('Are you sure you want to delete this model?')) {
-      deleteModel(modelId);
+      try {
+        // Call backend API to delete model using the correct model_id
+        const backendModelId = model.model_id || model.name.toLowerCase().replace(/\s+/g, '_');
+        const response = await fetch(`http://localhost:5000/delete_model/${backendModelId}`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          // If it's a 404 error (file doesn't exist) or other error, ask if user wants to clean up frontend state
+          if (response.status === 404 || window.confirm('Failed to delete model from backend. Do you want to remove it from the dashboard anyway?')) {
+            deleteModel(modelId);
+            return;
+          }
+          throw new Error(errorData.error || 'Failed to delete model');
+        }
+
+        // If the backend deletion is successful, update the frontend state
+        deleteModel(modelId);
+      } catch (error) {
+        console.error('Error deleting model:', error);
+        // If an error occurs, ask the user if they want to clean up the frontend state
+        if (window.confirm('Failed to delete model from backend. Do you want to remove it from the dashboard anyway?')) {
+          deleteModel(modelId);
+        } else {
+          alert(error instanceof Error ? error.message : 'Failed to delete model');
+        }
+      }
     }
   };
 
   const handleEdit = (model: Model) => {
-    // 检查用户是否有权限编辑此模型
+    // Check if the user has permission to edit the model
     if (user?.role === 'user' && model.createdBy !== user.email) {
       alert('You do not have permission to edit this model');
       return;
@@ -45,7 +72,7 @@ export default function ModelsList() {
     setIsEditModalOpen(true);
   };
 
-  // 显示所有模型，但标记哪些是用户自己的
+  // Display all models, but mark which ones are user's own
   const displayedModels: ModelWithPermissions[] = models.map(model => ({
     ...model,
     isOwner: model.createdBy === user?.email,
@@ -82,24 +109,27 @@ export default function ModelsList() {
           <div className="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
             <div className="inline-block min-w-full py-2 align-middle sm:px-6 lg:px-8">
               <table className="min-w-full divide-y divide-gray-300">
-                <thead>
+                <thead className="bg-gray-50">
                   <tr>
-                    <th key="name" scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">
+                    <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">
                       Name
                     </th>
-                    <th key="version" scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                      Type
+                    </th>
+                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                       Version
                     </th>
-                    <th key="createdBy" scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                       Created By
                     </th>
-                    <th key="lastUpdated" scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                       Last Updated
                     </th>
-                    <th key="status" scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                       Status
                     </th>
-                    <th key="actions" scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-0">
+                    <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-0">
                       <span className="sr-only">Actions</span>
                     </th>
                   </tr>
@@ -119,6 +149,15 @@ export default function ModelsList() {
                             </span>
                           )}
                         </div>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                        <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
+                          model.model_type === 'notebook'
+                            ? 'bg-purple-100 text-purple-800'
+                            : 'bg-green-100 text-green-800'
+                        }`}>
+                          {model.model_type === 'notebook' ? 'Notebook' : 'Pickle'}
+                        </span>
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         v{model.version}

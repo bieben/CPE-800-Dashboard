@@ -19,14 +19,19 @@ export default function AddModelModal({
   const [description, setDescription] = useState('');
   const [version, setVersion] = useState('1.0.0');
   const [file, setFile] = useState<File | null>(null);
+  const [modelType, setModelType] = useState<'notebook' | 'pickle'>('notebook');
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (!selectedFile.name.endsWith('.ipynb')) {
-        setError('Only .ipynb files are supported');
+      const isValidFile = modelType === 'notebook' 
+        ? selectedFile.name.endsWith('.ipynb')
+        : selectedFile.name.endsWith('.pkl');
+
+      if (!isValidFile) {
+        setError(`Only ${modelType === 'notebook' ? '.ipynb' : '.pkl'} files are supported`);
         return;
       }
       setFile(selectedFile);
@@ -57,28 +62,53 @@ export default function AddModelModal({
       formData.append('model_name', name);
       formData.append('model_description', description);
       formData.append('model_version', version);
-      formData.append('model_file', file);
-
-      const response = await fetch('http://10.156.115.33:5000/model/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to upload model');
-      }
-
-      const data = await response.json();
       
-      // Call onAdd with the model data
-      onAdd({
-        name: name || data.model_name,
-        description,
-        version,
-        file,
-        notebook_url: data.notebook_url
-      });
+      if (modelType === 'notebook') {
+        formData.append('model_file', file);
+        const response = await fetch('http://localhost:5000/model/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to upload model');
+        }
+
+        const data = await response.json();
+        onAdd({
+          name: name || data.model_name,
+          description,
+          version,
+          model_type: 'notebook',
+          file,
+          notebook_url: data.notebook_url
+        });
+      } else {
+        // For pickle models
+        formData.append('model_id', name.toLowerCase().replace(/\s+/g, '_'));
+        formData.append('file', file);
+        
+        const response = await fetch('http://localhost:5000/upload_model', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to upload model');
+        }
+
+        const data = await response.json();
+        onAdd({
+          name,
+          description,
+          version,
+          model_type: 'pickle',
+          file,
+          model_id: data.model_id
+        });
+      }
 
       onClose();
     } catch (err) {
@@ -95,6 +125,7 @@ export default function AddModelModal({
       setVersion('1.0.0');
       setFile(null);
       setError(null);
+      setModelType('notebook');
     }
   }, [isOpen]);
 
@@ -135,11 +166,25 @@ export default function AddModelModal({
                 <form onSubmit={handleSubmit} className="mt-4 space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
-                      Model File (.ipynb)
+                      Model Type
+                    </label>
+                    <select
+                      value={modelType}
+                      onChange={(e) => setModelType(e.target.value as 'notebook' | 'pickle')}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    >
+                      <option value="notebook">Jupyter Notebook (.ipynb)</option>
+                      <option value="pickle">Pickle Model (.pkl)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Model File ({modelType === 'notebook' ? '.ipynb' : '.pkl'})
                     </label>
                     <input
                       type="file"
-                      accept=".ipynb"
+                      accept={modelType === 'notebook' ? '.ipynb' : '.pkl'}
                       onChange={handleFileChange}
                       className="mt-1 block w-full text-sm text-gray-500
                         file:mr-4 file:py-2 file:px-4

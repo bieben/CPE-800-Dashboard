@@ -19,36 +19,92 @@ export default function NewDeploymentModal({
   onDeploy,
   availableEnvironments,
 }: NewDeploymentModalProps) {
-  const { models, updateModel } = useModels();
+  const { models } = useModels();
   const { updateDeployment, deployments } = useDeployments();
   const [selectedModel, setSelectedModel] = useState('');
   const [environment, setEnvironment] = useState<DeploymentEnvironment>(availableEnvironments[0]);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [deploymentList, setDeployments] = useState<Deployment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // Check model status
-  const checkModelStatus = async (modelName: string) => {
+  const checkModelStatus = async (modelId: string) => {
     try {
-      const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${modelName}&environment=${environment}`, {
-        method: 'GET',
-      });
+      const model = models.find(m => m.id === modelId);
+      if (!model) {
+        throw new Error('Model not found');
+      }
 
+      const backendModelId = model.model_id || model.name.toLowerCase().replace(/\s+/g, '_');
+      const response = await fetch('http://localhost:5000/models/status');
+      
       if (!response.ok) {
         throw new Error('Failed to check model status');
       }
 
-      const data = await response.json();
-      setStatus(data.status);
-      return data.status;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to check model status');
-      return null;
+      const statusData = await response.json();
+      const modelStatus = statusData[0].models[backendModelId];
+
+      if (!modelStatus) {
+        throw new Error(`Model ${model.name} is not uploaded to the monitoring system. Please upload it first.`);
+      }
+
+      // Check model status and provide specific error information
+      if (!modelStatus.metadata || !modelStatus.metadata.feature_names) {
+        throw new Error(`Model ${model.name} metadata is incomplete. Please check the model file.`);
+      }
+
+      if (modelStatus.status === 'failed') {
+        throw new Error(`Model ${model.name} is in failed state. Please check the model logs.`);
+      }
+
+      // Allow deployment for both inactive and active models
+      if (modelStatus.status === 'inactive') {
+        setStatus(`Ready to deploy (${modelStatus.metadata.feature_count} features)`);
+      } else if (modelStatus.status === 'active') {
+        setStatus(`Active (${modelStatus.metadata.feature_count} features)`);
+      } else {
+        throw new Error(`Model ${model.name} is in ${modelStatus.status} state. Please check the model status.`);
+      }
+
+      return {
+        isReady: true,
+        model,
+        backendModelId,
+        metadata: modelStatus.metadata,
+        performance: modelStatus.performance
+      };
+    } catch (error) {
+      console.error('Error checking model status:', error);
+      setError(error instanceof Error ? error.message : 'Failed to check model status');
+      setStatus(null);
+      return { isReady: false };
     }
   };
 
-  // When the selected model changes, check its status
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      // Check if the model is ready for deployment
+      const statusCheck = await checkModelStatus(selectedModel);
+      if (!statusCheck.isReady) {
+        return; // Error message already set in checkModelStatus
+      }
+
+      // Call the parent's onDeploy callback with model information
+      await onDeploy(selectedModel, environment);
+      onClose();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to deploy model');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const modelId = e.target.value;
     setSelectedModel(modelId);
@@ -56,81 +112,7 @@ export default function NewDeploymentModal({
     setStatus(null);
 
     if (modelId) {
-      const model = models.find(m => m.id === modelId);
-      if (model) {
-        await checkModelStatus(model.name);
-      }
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedModel) return;
-
-    try {
-      const model = models.find(m => m.id === selectedModel);
-      if (!model) {
-        throw new Error('Model not found');
-      }
-
-      // Check model status first
-      const currentStatus = await checkModelStatus(model.name);
-      
-      if (currentStatus === 'Deployed' || currentStatus === 'Pending') {
-        // Execute deployment
-        onDeploy(selectedModel, environment);
-        
-        // Wait for deployment to complete
-        let deploymentStatus = 'Pending';
-        let retries = 0;
-        const maxRetries = 10;  // Maximum number of retries
-
-        while (deploymentStatus === 'Pending' && retries < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 2000));  // Wait for 2 seconds
-          const status = await checkModelStatus(model.name);
-          deploymentStatus = status;
-          retries++;
-        }
-
-        if (deploymentStatus === 'Deployed') {
-          // Get the model to access its notebook_url
-          if (!model || !model.notebook_url) {
-            setError('Notebook URL not found');
-            return;
-          }
-          
-          // Update deployment status
-          const deploymentId = `${selectedModel}-${environment}-${Date.now()}`;
-          const deployment = deployments.find(d => d.modelId === selectedModel && d.environment === environment);
-          if (deployment) {
-            updateDeployment(deployment.id, { status: 'running' });
-          }
-          
-          // Update model status
-          updateModel(selectedModel, { status: 'running' });
-          
-          // Open notebook URL in a new tab
-          window.open(model.notebook_url, '_blank');
-          onClose();
-        } else {
-          setError('Deployment timeout or failed');
-          // Update deployment status to failed
-          const deployment = deployments.find(d => d.modelId === selectedModel && d.environment === environment);
-          if (deployment) {
-            updateDeployment(deployment.id, { status: 'failed' });
-          }
-          // Update model status to failed
-          updateModel(selectedModel, { status: 'failed' });
-        }
-      } else if (currentStatus === 'Model Not Found') {
-        setError('Model not found in the system');
-      } else if (currentStatus === 'No notebook found for model') {
-        setError('Model files are missing');
-      } else {
-        setError('Model is not ready for deployment');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to deploy model');
+      await checkModelStatus(modelId);
     }
   };
 
@@ -143,7 +125,7 @@ export default function NewDeploymentModal({
       // Get deployment status for each model
       const deploymentPromises = models.map(async (model) => {
         try {
-          const response = await fetch(`http://10.156.115.33:5000/model/status?model_name=${model.name}`);
+          const response = await fetch(`http://localhost:5000/models/status?model_name=${model.name}`);
           if (!response.ok) {
             throw new Error('Failed to fetch deployment status');
           }
@@ -277,14 +259,14 @@ export default function NewDeploymentModal({
                     </button>
                     <button
                       type="submit"
-                      disabled={status !== 'Deployed'}
+                      disabled={loading || !selectedModel}
                       className={`inline-flex justify-center rounded-md border border-transparent px-4 py-2 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                        status === 'Deployed'
-                          ? 'bg-primary-600 hover:bg-primary-700'
-                          : 'bg-gray-400 cursor-not-allowed'
+                        loading || !selectedModel
+                          ? 'bg-gray-400 cursor-not-allowed'
+                          : 'bg-primary-600 hover:bg-primary-700'
                       }`}
                     >
-                      Deploy
+                      {loading ? 'Deploying...' : 'Deploy'}
                     </button>
                   </div>
                 </form>

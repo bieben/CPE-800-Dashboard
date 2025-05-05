@@ -8,6 +8,10 @@ interface ModelMetrics {
   loaded: number;
   predictions: number;
   latency: number;
+  features?: {
+    names: string[];
+    count: number;
+  };
 }
 
 interface Metrics {
@@ -27,6 +31,12 @@ export default function AnalyticsDashboard() {
   const [predictLoading, setPredictLoading] = useState(false);
   const [predictError, setPredictError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [alerts, setAlerts] = useState<Array<{
+    modelId: string;
+    message: string;
+    timestamp: string;
+    type: 'latency' | 'error' | 'resource';
+  }>>([]);
 
   // Generate Grafana URL with auto-refresh
   const getGrafanaUrl = () => {
@@ -46,67 +56,50 @@ export default function AnalyticsDashboard() {
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
-        const response = await fetch('http://127.0.0.1:5000/metrics', {
-          method: 'GET',
-          headers: {
-            'Accept': 'text/plain',
-          },
+        // 获取 Prometheus 指标
+        const prometheusResponse = await fetch('http://localhost:5000/metrics', {
+          headers: { 'Accept': 'text/plain' },
         });
-        if (!response.ok) {
-          throw new Error(`Failed to fetch metrics: ${response.status} ${response.statusText}`);
-        }
-        const data = await response.text();
-        console.log('Received metrics data:', data);
+        const prometheusData = await prometheusResponse.text();
         
-        // Parse Prometheus metrics
-        const requestsMatch = data.match(/inference_requests_total (\d+)/);
-        const latencyMatch = data.match(/inference_latency_seconds_sum (\d+\.\d+)/);
-        const countMatch = data.match(/inference_latency_seconds_count (\d+)/);
+        // 获取模型状态
+        const modelStatusResponse = await fetch('http://localhost:5000/models/status');
+        const modelStatusData = await modelStatusResponse.json();
+
+        // 解析 Prometheus 指标
+        const requestsMatch = prometheusData.match(/inference_requests_total (\d+)/);
+        const latencyMatch = prometheusData.match(/inference_latency_seconds_sum (\d+\.\d+)/);
+        const countMatch = prometheusData.match(/inference_latency_seconds_count (\d+)/);
         
-        // Parse per-model metrics
+        // 解析模型特定指标
         const modelMetrics: Record<string, ModelMetrics> = {};
-        const modelLoadedRegex = /model_loaded{model_name="([^"]+)"} (\d+)/g;
-        const modelPredictionsRegex = /model_predictions_total{model_name="([^"]+)"} (\d+)/g;
-        const modelLatencyRegex = /model_latency_seconds_sum{model_name="([^"]+)"} (\d+\.\d+)/g;
-        const modelLatencyCountRegex = /model_latency_seconds_count{model_name="([^"]+)"} (\d+)/g;
-        
-        let match;
-        while ((match = modelLoadedRegex.exec(data)) !== null) {
-          const modelName = match[1];
-          modelMetrics[modelName] = {
-            loaded: parseInt(match[2]),
-            predictions: 0,
-            latency: 0,
+        Object.entries(modelStatusData.models || {}).forEach(([modelId, info]: [string, any]) => {
+          modelMetrics[modelId] = {
+            loaded: 1,
+            predictions: info.performance.total_predictions,
+            latency: info.performance.avg_latency_ms / 1000,
+            features: {
+              names: info.metadata.feature_names,
+              count: info.metadata.feature_count
+            }
           };
-        }
-        
-        while ((match = modelPredictionsRegex.exec(data)) !== null) {
-          const modelName = match[1];
-          if (!modelMetrics[modelName]) {
-            modelMetrics[modelName] = { loaded: 0, predictions: 0, latency: 0 };
+
+          // 检查高延迟告警
+          if (info.performance.avg_latency_ms > 1000) {
+            setAlerts(prev => [...prev, {
+              modelId,
+              message: `High latency detected: ${info.performance.avg_latency_ms}ms`,
+              timestamp: new Date().toISOString(),
+              type: 'latency'
+            }]);
           }
-          modelMetrics[modelName].predictions = parseInt(match[2]);
-        }
-        
-        while ((match = modelLatencyRegex.exec(data)) !== null) {
-          const modelName = match[1];
-          if (!modelMetrics[modelName]) {
-            modelMetrics[modelName] = { loaded: 0, predictions: 0, latency: 0 };
-          }
-          const latencySum = parseFloat(match[2]);
-          const latencyCountMatch = new RegExp(`model_latency_seconds_count{model_name="${modelName}"} (\\d+)`).exec(data);
-          const latencyCount = latencyCountMatch ? parseInt(latencyCountMatch[1]) : 0;
-          modelMetrics[modelName].latency = latencyCount > 0 ? latencySum / latencyCount : 0;
-        }
-        
-        const requests = requestsMatch ? parseInt(requestsMatch[1]) : 0;
-        const latencySum = latencyMatch ? parseFloat(latencyMatch[1]) : 0;
-        const latencyCount = countMatch ? parseInt(countMatch[1]) : 0;
-        const avgLatency = latencyCount > 0 ? latencySum / latencyCount : 0;
-        
+        });
+
         setMetrics({
-          inference_requests_total: requests,
-          inference_latency_seconds: avgLatency,
+          inference_requests_total: requestsMatch ? parseInt(requestsMatch[1]) : 0,
+          inference_latency_seconds: latencyMatch && countMatch 
+            ? parseFloat(latencyMatch[1]) / parseInt(countMatch[1])
+            : 0,
           model_metrics: modelMetrics,
         });
       } catch (error) {
@@ -120,8 +113,7 @@ export default function AnalyticsDashboard() {
     };
 
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 5000); // Refresh every 5 seconds
-
+    const interval = setInterval(fetchMetrics, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -178,17 +170,133 @@ export default function AnalyticsDashboard() {
       {/* Grafana Panel */}
       <div className="bg-white overflow-hidden shadow-sm rounded-lg">
         <div className="p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Grafana Dashboard</h2>
-          <div className="w-full">
-            <iframe
-              src={getGrafanaUrl()}
-              width="750"
-              height="400"
-              frameBorder="0"
-            />
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Performance Overview</h2>
+          <iframe
+            src="http://localhost:3000/d-solo/aeif7zg733caoe/test"
+            width="100%"
+            height="400"
+            frameBorder="0"
+          />
+        </div>
+      </div>
+
+      {/* Metrics Summary */}
+      <div className="bg-white overflow-hidden shadow-sm rounded-lg">
+        <div className="p-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Metrics Summary</h2>
+          {loading ? (
+            <p>Loading metrics...</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm font-medium text-gray-500">Total Requests</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">
+                  {metrics.inference_requests_total.toLocaleString()}
+                </p>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm font-medium text-gray-500">Average Latency</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">
+                  {(metrics.inference_latency_seconds * 1000).toFixed(2)}ms
+                </p>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm font-medium text-gray-500">Active Models</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">
+                  {Object.keys(metrics.model_metrics).length}
+                </p>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm font-medium text-gray-500">Total Predictions</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">
+                  {Object.values(metrics.model_metrics)
+                    .reduce((sum, m) => sum + m.predictions, 0)
+                    .toLocaleString()}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Model Details */}
+      <div className="bg-white overflow-hidden shadow-sm rounded-lg">
+        <div className="p-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Model Details</h2>
+          <div className="grid grid-cols-1 gap-4">
+            {Object.entries(metrics.model_metrics).map(([modelId, modelMetrics]) => (
+              <div key={modelId} className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="text-lg font-medium text-gray-900">{modelId}</h3>
+                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Predictions</p>
+                    <p className="mt-1 text-lg font-semibold text-gray-900">
+                      {modelMetrics.predictions.toLocaleString()}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Avg Latency</p>
+                    <p className="mt-1 text-lg font-semibold text-gray-900">
+                      {(modelMetrics.latency * 1000).toFixed(2)}ms
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Features</p>
+                    <p className="mt-1 text-lg font-semibold text-gray-900">
+                      {modelMetrics.features?.count || 0}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Status</p>
+                    <p className="mt-1 text-lg font-semibold text-gray-900">
+                      {modelMetrics.loaded > 0 ? 'Active' : 'Inactive'}
+                    </p>
+                  </div>
+                </div>
+                {modelMetrics.features?.names && (
+                  <div className="mt-2">
+                    <p className="text-sm font-medium text-gray-500">Feature Names</p>
+                    <p className="mt-1 text-sm text-gray-600">
+                      {modelMetrics.features.names.join(', ')}
+                    </p>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </div>
+
+      {/* Alerts */}
+      {alerts.length > 0 && (
+        <div className="bg-white overflow-hidden shadow-sm rounded-lg">
+          <div className="p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Alerts</h2>
+            <div className="space-y-2">
+              {alerts.map((alert, index) => (
+                <div
+                  key={index}
+                  className={`p-4 rounded-lg ${
+                    alert.type === 'latency'
+                      ? 'bg-yellow-50 text-yellow-800'
+                      : alert.type === 'error'
+                      ? 'bg-red-50 text-red-800'
+                      : 'bg-blue-50 text-blue-800'
+                  }`}
+                >
+                  <div className="flex justify-between">
+                    <p className="font-medium">{alert.modelId}</p>
+                    <p className="text-sm">
+                      {new Date(alert.timestamp).toLocaleTimeString()}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-sm">{alert.message}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Flask Metrics Card */}
       <div className="bg-white overflow-hidden shadow-sm rounded-lg">

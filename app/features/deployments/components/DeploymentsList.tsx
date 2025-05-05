@@ -9,8 +9,8 @@ import NewDeploymentModal from './NewDeploymentModal';
 import type { DeploymentEnvironment } from '../types';
 
 export default function DeploymentsList() {
-  const { models } = useModels();
-  const { deployments, addDeployment, deleteDeployment } = useDeployments();
+  const { models, updateModel } = useModels();
+  const { deployments, addDeployment, deleteDeployment, updateDeployment } = useDeployments();
   const { user } = useAuth();
   const [isNewDeploymentModalOpen, setIsNewDeploymentModalOpen] = useState(false);
 
@@ -26,54 +26,183 @@ export default function DeploymentsList() {
     }
   };
 
-  const handleDeploy = (modelId: string, environment: DeploymentEnvironment) => {
+  const handleDeploy = async (modelId: string, environment: DeploymentEnvironment) => {
     const model = models.find(m => m.id === modelId);
     if (!model) return;
 
-    // 检查用户是否有权限在选定环境中部署
+    // Check if the user has permission to deploy in the selected environment
     const availableEnvironments = getAvailableEnvironments(user?.role || 'user');
     if (!availableEnvironments.includes(environment)) {
       alert('You do not have permission to deploy to this environment');
       return;
     }
 
-    const newDeployment = {
-      id: `${modelId}-${environment}-${Date.now()}`,
-      modelId,
-      modelName: model.name,
-      environment,
-      status: 'pending' as const,
-      version: model.version,
-      createdAt: new Date().toISOString(),
-      lastUpdated: new Date().toISOString(),
-      resources: {
-        cpu: '2 cores',
-        memory: '8GB',
-        gpu: 'N/A',
-      },
-      metrics: {
-        uptime: '0%',
-        requests: 0,
-        latency: '0ms',
-      },
-      description: `Deployment of ${model.name} in ${environment} environment`,
-    };
+    try {
+      // Create initial deployment record with pending status
+      const deploymentId = `${modelId}-${environment}-${Date.now()}`;
+      const initialDeployment = {
+        id: deploymentId,
+        modelId,
+        modelName: model.name,
+        environment,
+        status: 'pending' as const,
+        version: model.version,
+        createdAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+        resources: {
+          cpu: '2 cores',
+          memory: '8GB',
+          gpu: 'N/A'
+        },
+        metrics: {
+          uptime: '0%',
+          requests: 0,
+          latency: '0ms',
+        },
+        description: `Deploying ${model.name} to ${environment} environment...`,
+      };
 
-    addDeployment(newDeployment);
+      // Add deployment record
+      addDeployment(initialDeployment);
+
+      // Call backend deployment API
+      const backendModelId = model.model_id || model.name.toLowerCase().replace(/\s+/g, '_');
+      const response = await fetch('http://localhost:5000/deploy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model_id: backendModelId,
+          environment: environment.toLowerCase()
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to deploy model');
+      }
+
+      const deployData = await response.json();
+
+      // Update deployment with success status
+      const updatedDeployment = {
+        ...initialDeployment,
+        status: 'running' as const,
+        resources: deployData?.config?.resources || initialDeployment.resources,
+        description: deployData?.message 
+          ? `${deployData.message}. Deployed in ${environment} environment`
+          : `Successfully deployed in ${environment} environment`,
+      };
+
+      // Update deployment record
+      updateDeployment(deploymentId, updatedDeployment);
+
+      // Update model status
+      updateModel(modelId, {
+        status: 'running',
+        lastUpdated: new Date().toISOString(),
+        metrics: {
+          requests: 0,
+          latency: '0ms',
+          accuracy: '0%'
+        }
+      });
+
+      // Get updated model status from monitoring system
+      const statusResponse = await fetch('http://localhost:5000/models/status');
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json();
+        const modelStatus = statusData[0].models[backendModelId];
+        if (modelStatus) {
+          updateModel(modelId, {
+            metrics: {
+              requests: modelStatus.performance?.total_predictions || 0,
+              latency: `${modelStatus.performance?.avg_latency_ms || 0}ms`,
+              accuracy: modelStatus.performance?.accuracy || '0%'
+            }
+          });
+        }
+      }
+
+    } catch (error) {
+      console.error('Deployment failed:', error);
+      
+      // Update deployment with failed status
+      const failedDeployment = {
+        ...deployments.find(d => d.modelId === modelId && d.environment === environment),
+        status: 'failed' as const,
+        description: `Deployment failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        lastUpdated: new Date().toISOString(),
+      };
+
+      if (failedDeployment.id) {
+        updateDeployment(failedDeployment.id, failedDeployment);
+      }
+
+      // Update model status
+      updateModel(modelId, { 
+        status: 'failed'
+      });
+
+      alert(error instanceof Error ? error.message : 'Failed to deploy model');
+    }
   };
 
-  const handleDelete = (deploymentId: string) => {
+  const handleDelete = async (deploymentId: string) => {
     const deployment = deployments.find(d => d.id === deploymentId);
     if (!deployment) return;
 
-    // 检查用户是否有权限删除此部署
+    // Check if the user has permission to delete the deployment
     if (user?.role === 'user' && deployment.environment !== 'development') {
       alert('You can only delete deployments in the development environment');
       return;
     }
 
     if (window.confirm('Are you sure you want to delete this deployment?')) {
-      deleteDeployment(deploymentId);
+      try {
+        // Call backend API to stop the deployment
+        const model = models.find(m => m.id === deployment.modelId);
+        if (!model) {
+          throw new Error('Associated model not found');
+        }
+
+        const backendModelId = model.model_id || model.name.toLowerCase().replace(/\s+/g, '_');
+        const response = await fetch(`http://localhost:5000/delete_model/${backendModelId}`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok && response.status !== 404) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to delete deployment');
+        }
+
+        // Delete the deployment record
+        deleteDeployment(deploymentId);
+
+        // Check if this model has any other active deployments
+        const otherActiveDeployments = deployments.some(d => 
+          d.modelId === deployment.modelId && 
+          d.id !== deploymentId && 
+          d.status === 'running'
+        );
+
+        // Only update model status if this was the last active deployment
+        if (!otherActiveDeployments) {
+          updateModel(deployment.modelId, {
+            status: 'stopped',
+            lastUpdated: new Date().toISOString(),
+            metrics: {
+              requests: 0,
+              latency: '0ms',
+              accuracy: '0%'
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error deleting deployment:', error);
+        alert(error instanceof Error ? error.message : 'Failed to delete deployment');
+      }
     }
   };
 

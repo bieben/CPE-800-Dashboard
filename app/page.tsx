@@ -15,7 +15,6 @@ interface StatCardProps {
   className?: string;
 }
 
-// 定义统计卡片组件
 function StatCard({ title, value, description, className = '' }: StatCardProps) {
   return (
     <div className={`bg-white overflow-hidden shadow rounded-lg ${className}`}>
@@ -48,7 +47,6 @@ interface ActionCardProps {
   className?: string;
 }
 
-// 定义快速操作卡片组件
 function ActionCard({ title, description, actionText, href, className = '' }: ActionCardProps) {
   return (
     <div className={`bg-white overflow-hidden shadow rounded-lg ${className}`}>
@@ -135,21 +133,20 @@ export default function Home() {
           />
         </div>
 
-        {/* 快速操作 */}
         <div className="mt-8">
           <h2 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h2>
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            <ActionCard
-              title="Deploy New Model"
-              description="Deploy a model to development, staging, or production environment"
-              actionText="Deploy Model"
-              href="/deployments"
-            />
             <ActionCard
               title="Add New Model"
               description="Upload and configure a new model in the system"
               actionText="Add Model"
               href="/models"
+            />
+            <ActionCard
+              title="Deploy New Model"
+              description="Deploy a model to development, staging, or production environment"
+              actionText="Deploy Model"
+              href="/deployments"
             />
             <ActionCard
               title="View Analytics"
@@ -166,7 +163,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 最近部署 */}
         <div className="mt-8">
           <h2 className="text-lg font-medium text-gray-900 mb-4">Recent Deployments</h2>
           <div className="bg-white shadow overflow-hidden sm:rounded-md">
@@ -214,7 +210,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 管理员专属区域 */}
         {(user?.role === 'admin' || user?.role === 'super_admin') && (
           <div className="mt-8">
             <h2 className="text-lg font-medium text-gray-900 mb-4">Admin Tools</h2>
