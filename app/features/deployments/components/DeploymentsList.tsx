@@ -159,7 +159,7 @@ export default function DeploymentsList() {
       return;
     }
 
-    if (window.confirm('Are you sure you want to delete this deployment?')) {
+    if (window.confirm('Are you sure you want to stop this deployment?')) {
       try {
         // Call backend API to stop the deployment
         const model = models.find(m => m.id === deployment.modelId);
@@ -168,13 +168,13 @@ export default function DeploymentsList() {
         }
 
         const backendModelId = model.model_id || model.name.toLowerCase().replace(/\s+/g, '_');
-        const response = await fetch(`http://localhost:5000/delete_model/${backendModelId}`, {
-          method: 'DELETE',
+        const response = await fetch(`http://localhost:5000/stop_deployment/${backendModelId}`, {
+          method: 'POST',
         });
 
-        if (!response.ok && response.status !== 404) {
+        if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(errorData.error || 'Failed to delete deployment');
+          throw new Error(errorData.error || 'Failed to stop deployment');
         }
 
         // Delete the deployment record
@@ -200,8 +200,8 @@ export default function DeploymentsList() {
           });
         }
       } catch (error) {
-        console.error('Error deleting deployment:', error);
-        alert(error instanceof Error ? error.message : 'Failed to delete deployment');
+        console.error('Error stopping deployment:', error);
+        alert(error instanceof Error ? error.message : 'Failed to stop deployment');
       }
     }
   };

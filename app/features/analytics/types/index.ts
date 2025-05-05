@@ -3,36 +3,41 @@ export interface PerformanceMetric {
   value: number;
 }
 
-export interface ModelMetrics {
-  id: string;
-  modelName: string;
-  environment: string;
-  metrics: {
-    requestsPerMinute: PerformanceMetric[];
-    latency: PerformanceMetric[];
-    errorRate: PerformanceMetric[];
-    cpuUsage: PerformanceMetric[];
-    memoryUsage: PerformanceMetric[];
+export interface ModelStatus {
+  status: 'active' | 'inactive';
+  metadata: {
+    upload_time: string;
+    feature_names: string[];
+    feature_count: number;
   };
-  summary: {
-    totalRequests: number;
-    averageLatency: string;
-    averageErrorRate: string;
-    uptime: string;
-    cost: string;
+  performance: {
+    total_predictions: number;
+    avg_latency_ms: number;
+    last_prediction: string;
   };
-  features?: {
-    names: string[];
-    count: number;
+  deployment: {
+    deployed: boolean;
+    deploy_config: {
+      resources: {
+        cpu: string;
+        memory: string;
+        gpu: string;
+      };
+    };
+    deploy_time: string;
   };
-  predictions?: {
-    total: number;
-    lastPrediction: string;
-    avgLatency: number;
-  };
-  alerts?: {
-    highLatency: boolean;
-    threshold: number;
-    lastAlert: string;
-  };
+}
+
+export interface Alert {
+  modelId: string;
+  message: string;
+  timestamp: string;
+  type: 'latency' | 'error' | 'resource';
+}
+
+export interface MetricsState {
+  totalRequests: number;
+  avgLatency: number;
+  activeModels: number;
+  modelMetrics: Record<string, ModelStatus>;
 } 

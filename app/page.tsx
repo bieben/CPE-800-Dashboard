@@ -209,30 +209,6 @@ export default function Home() {
             )}
           </div>
         </div>
-
-        {(user?.role === 'admin' || user?.role === 'super_admin') && (
-          <div className="mt-8">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Admin Tools</h2>
-            <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-              <div className="px-4 py-5 sm:p-6">
-                <h3 className="text-lg leading-6 font-medium text-gray-900">
-                  System Management
-                </h3>
-                <div className="mt-2 max-w-xl text-sm text-gray-500">
-                  <p>Access advanced system settings and user management tools.</p>
-                </div>
-                <div className="mt-5">
-                  <Link
-                    href="/settings"
-                    className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                  >
-                    Go to Settings
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

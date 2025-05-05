@@ -17,11 +17,7 @@ export default function Navigation() {
     { name: 'Home', href: '/' },
     { name: 'Models', href: '/models' },
     { name: 'Deployments', href: '/deployments' },
-    { name: 'Analytics', href: '/analytics' },
-    // 仅管理员可见的导航项
-    ...(user?.role === 'admin' || user?.role === 'super_admin' ? [
-      { name: 'Settings', href: '/settings' }
-    ] : [])
+    { name: 'Analytics', href: '/analytics' }
   ];
 
   return (
