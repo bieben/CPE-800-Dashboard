@@ -1,7 +1,7 @@
 'use client';
 
 import ProtectedLayout from '@/features/shared/components/ProtectedLayout';
-import FedoraDeployForm from '@/features/dashboard/components/FedoraDeployForm';
+import FedoraDeployForm from '@/features/deploy/components/FedoraDeployForm';
 
 export default function FedoraDeployPage() {
   return (
