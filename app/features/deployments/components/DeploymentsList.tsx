@@ -6,13 +6,14 @@ import { useDeployments } from '../context/DeploymentContext';
 import { useModels } from '@/features/models/context/ModelContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import NewDeploymentModal from './NewDeploymentModal';
-import type { DeploymentEnvironment } from '../types';
+import type { DeploymentEnvironment, Deployment } from '../types';
 
 export default function DeploymentsList() {
   const { models } = useModels();
   const { deployments, addDeployment, deleteDeployment } = useDeployments();
   const { user } = useAuth();
   const [isNewDeploymentModalOpen, setIsNewDeploymentModalOpen] = useState(false);
+  const [selectedApiUrl, setSelectedApiUrl] = useState<string | null>(null);
 
   // 根据用户角色获取可用的环境
   const getAvailableEnvironments = (userRole: string): DeploymentEnvironment[] => {
@@ -77,6 +78,33 @@ export default function DeploymentsList() {
     }
   };
 
+  // Extract API URL from deployment description
+  const extractApiUrl = (description: string | undefined): string | null => {
+    if (!description) return null;
+    
+    if (description.includes('API Deployment') && description.includes('Endpoint:')) {
+      const match = description.match(/Endpoint: (http[s]?:\/\/[^\s]+)/);
+      return match ? match[1] : null;
+    }
+    
+    return null;
+  };
+
+  // Check if deployment is an API deployment
+  const isApiDeployment = (deployment: Deployment): boolean => {
+    return !!extractApiUrl(deployment.description);
+  };
+
+  // Show API URL in modal or open it
+  const handleViewApiUrl = (url: string) => {
+    setSelectedApiUrl(url);
+  };
+
+  // Open API endpoint in new tab
+  const openApiEndpoint = (url: string) => {
+    window.open(url, '_blank');
+  };
+
   return (
     <div className="bg-white shadow-sm rounded-lg">
       <div className="px-4 py-5 sm:p-6">
@@ -121,11 +149,12 @@ export default function DeploymentsList() {
                     <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                       Version
                     </th>
-                    <RoleGuard allowedRoles={['admin', 'super_admin']}>
-                      <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-0">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </RoleGuard>
+                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                      Type
+                    </th>
+                    <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-0">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -133,7 +162,7 @@ export default function DeploymentsList() {
                     <tr key={deployment.id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm">
                         <div className="font-medium text-gray-900">{deployment.modelName}</div>
-                        <div className="text-gray-500">{deployment.description}</div>
+                        <div className="text-gray-500 truncate max-w-xs">{deployment.description}</div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm">
                         <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
@@ -162,23 +191,83 @@ export default function DeploymentsList() {
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         v{deployment.version}
                       </td>
-                      <RoleGuard allowedRoles={['admin', 'super_admin']}>
-                        <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-0">
+                      <td className="whitespace-nowrap px-3 py-4 text-sm">
+                        <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
+                          isApiDeployment(deployment)
+                            ? 'bg-indigo-100 text-indigo-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {isApiDeployment(deployment) ? 'API' : 'Notebook'}
+                        </span>
+                      </td>
+                      <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-0">
+                        {isApiDeployment(deployment) && deployment.status === 'running' && (
                           <button 
-                            onClick={() => handleDelete(deployment.id)}
-                            className="text-red-600 hover:text-red-900"
+                            onClick={() => {
+                              const apiUrl = extractApiUrl(deployment.description);
+                              if (apiUrl) {
+                                openApiEndpoint(apiUrl);
+                              }
+                            }}
+                            className="text-primary-600 hover:text-primary-900 mr-3"
                           >
-                            Delete
+                            Open API
                           </button>
-                        </td>
-                      </RoleGuard>
+                        )}
+                        <button 
+                          onClick={() => handleDelete(deployment.id)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              {deployments.length === 0 && (
+                <div className="text-center py-6 text-sm text-gray-500">
+                  No deployments found. Click "New Deployment" to deploy a model.
+                </div>
+              )}
             </div>
           </div>
         </div>
+
+        {selectedApiUrl && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg p-6 max-w-lg w-full">
+              <h3 className="text-lg font-medium text-gray-900">API Endpoint</h3>
+              <div className="mt-4">
+                <p className="text-sm text-gray-700 mb-2">Your model is deployed at the following API endpoint:</p>
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <p className="text-sm font-mono break-all">{selectedApiUrl}</p>
+                </div>
+                <p className="mt-2 text-sm text-gray-600">
+                  To make predictions, send a POST request to{' '}
+                  <span className="font-mono">{selectedApiUrl}/predict</span>{' '}
+                  with your data in JSON format.
+                </p>
+              </div>
+              <div className="mt-6 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => openApiEndpoint(selectedApiUrl)}
+                  className="inline-flex justify-center rounded-md border border-transparent bg-primary-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
+                >
+                  Open in Browser
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedApiUrl(null)}
+                  className="inline-flex justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <RoleGuard 
           allowedRoles={['admin', 'super_admin']}

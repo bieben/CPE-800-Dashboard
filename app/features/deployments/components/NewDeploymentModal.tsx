@@ -27,6 +27,10 @@ export default function NewDeploymentModal({
   const [status, setStatus] = useState<string | null>(null);
   const [deploymentList, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deploymentType, setDeploymentType] = useState<'notebook' | 'api'>('notebook');
+  const [modelClassName, setModelClassName] = useState('');
+  const [deploymentStatus, setDeploymentStatus] = useState<string | null>(null);
+  const [apiEndpoint, setApiEndpoint] = useState<string | null>(null);
 
   // Check model status
   const checkModelStatus = async (modelName: string) => {
@@ -48,12 +52,43 @@ export default function NewDeploymentModal({
     }
   };
 
+  // Deploy model as API
+  const deployModelAsApi = async (modelName: string, modelFilename: string, modelClassName: string) => {
+    try {
+      const url = new URL('http://10.156.115.33:5000/deploy_model');
+      url.searchParams.append('model_name', modelName);
+      url.searchParams.append('model_filename', modelFilename);
+      url.searchParams.append('model_code_name', modelClassName);
+      url.searchParams.append('environment', environment);
+
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to deploy model as API');
+      }
+
+      const data = await response.json();
+      setDeploymentStatus('Deployed');
+      setApiEndpoint(data.url);
+      return data;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to deploy model as API');
+      setDeploymentStatus('Failed');
+      return null;
+    }
+  };
+
   // When the selected model changes, check its status
   const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const modelId = e.target.value;
     setSelectedModel(modelId);
     setError(null);
     setStatus(null);
+    setDeploymentStatus(null);
+    setApiEndpoint(null);
 
     if (modelId) {
       const model = models.find(m => m.id === modelId);
@@ -77,50 +112,92 @@ export default function NewDeploymentModal({
       const currentStatus = await checkModelStatus(model.name);
       
       if (currentStatus === 'Deployed' || currentStatus === 'Pending') {
-        // Execute deployment
+        // Create deployment record
         onDeploy(selectedModel, environment);
+        const deployment = deployments.find(d => d.modelId === selectedModel && d.environment === environment);
         
-        // Wait for deployment to complete
-        let deploymentStatus = 'Pending';
-        let retries = 0;
-        const maxRetries = 10;  // Maximum number of retries
+        if (deploymentType === 'notebook') {
+          // Execute notebook deployment
+          // Wait for deployment to complete
+          let deploymentStatus = 'Pending';
+          let retries = 0;
+          const maxRetries = 10;  // Maximum number of retries
 
-        while (deploymentStatus === 'Pending' && retries < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 2000));  // Wait for 2 seconds
-          const status = await checkModelStatus(model.name);
-          deploymentStatus = status;
-          retries++;
-        }
+          while (deploymentStatus === 'Pending' && retries < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 2000));  // Wait for 2 seconds
+            const status = await checkModelStatus(model.name);
+            deploymentStatus = status;
+            retries++;
+          }
 
-        if (deploymentStatus === 'Deployed') {
-          // Get the model to access its notebook_url
-          if (!model || !model.notebook_url) {
-            setError('Notebook URL not found');
+          if (deploymentStatus === 'Deployed') {
+            // Get the model to access its notebook_url
+            if (!model || !model.notebook_url) {
+              setError('Notebook URL not found');
+              return;
+            }
+            
+            // Update deployment status
+            if (deployment) {
+              updateDeployment(deployment.id, { status: 'running' });
+            }
+            
+            // Update model status
+            updateModel(selectedModel, { status: 'running' });
+            
+            // Open notebook URL in a new tab
+            window.open(model.notebook_url, '_blank');
+            onClose();
+          } else {
+            setError('Deployment timeout or failed');
+            // Update deployment status to failed
+            if (deployment) {
+              updateDeployment(deployment.id, { status: 'failed' });
+            }
+            // Update model status to failed
+            updateModel(selectedModel, { status: 'failed' });
+          }
+        } else if (deploymentType === 'api') {
+          // Deploy as API
+          if (!modelClassName) {
+            setError('Model class name is required for API deployment');
             return;
           }
-          
-          // Update deployment status
-          const deploymentId = `${selectedModel}-${environment}-${Date.now()}`;
-          const deployment = deployments.find(d => d.modelId === selectedModel && d.environment === environment);
-          if (deployment) {
-            updateDeployment(deployment.id, { status: 'running' });
+
+          // Get the notebook filename from the URL
+          const notebookFilename = model.notebook_url ? model.notebook_url.split('/').pop() : null;
+          if (!notebookFilename) {
+            setError('Could not determine notebook filename');
+            return;
           }
+
+          setDeploymentStatus('Pending');
+          const apiResult = await deployModelAsApi(model.name, notebookFilename, modelClassName);
           
-          // Update model status
-          updateModel(selectedModel, { status: 'running' });
-          
-          // Open notebook URL in a new tab
-          window.open(model.notebook_url, '_blank');
-          onClose();
-        } else {
-          setError('Deployment timeout or failed');
-          // Update deployment status to failed
-          const deployment = deployments.find(d => d.modelId === selectedModel && d.environment === environment);
-          if (deployment) {
-            updateDeployment(deployment.id, { status: 'failed' });
+          if (apiResult) {
+            // Update deployment status
+            if (deployment) {
+              updateDeployment(deployment.id, { 
+                status: 'running',
+                description: `API Deployment of ${model.name} - Endpoint: ${apiResult.url}` 
+              });
+            }
+            
+            // Update model status
+            updateModel(selectedModel, { status: 'running' });
+            
+            // Wait a bit before closing to show success message
+            setTimeout(() => {
+              onClose();
+            }, 3000);
+          } else {
+            // Update deployment status to failed
+            if (deployment) {
+              updateDeployment(deployment.id, { status: 'failed' });
+            }
+            // Update model status to failed
+            updateModel(selectedModel, { status: 'failed' });
           }
-          // Update model status to failed
-          updateModel(selectedModel, { status: 'failed' });
         }
       } else if (currentStatus === 'Model Not Found') {
         setError('Model not found in the system');
@@ -233,6 +310,61 @@ export default function NewDeploymentModal({
                         ))}
                       </select>
                     </div>
+                    
+                    <div>
+                      <label htmlFor="deploymentType" className="block text-sm font-medium text-gray-700">
+                        Deployment Type
+                      </label>
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center">
+                          <input
+                            id="notebook-type"
+                            name="deploymentType"
+                            type="radio"
+                            checked={deploymentType === 'notebook'}
+                            onChange={() => setDeploymentType('notebook')}
+                            className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300"
+                          />
+                          <label htmlFor="notebook-type" className="ml-3 block text-sm text-gray-700">
+                            Deploy as Notebook (Interactive)
+                          </label>
+                        </div>
+                        <div className="flex items-center">
+                          <input
+                            id="api-type"
+                            name="deploymentType"
+                            type="radio"
+                            checked={deploymentType === 'api'}
+                            onChange={() => setDeploymentType('api')}
+                            className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300"
+                          />
+                          <label htmlFor="api-type" className="ml-3 block text-sm text-gray-700">
+                            Deploy as API Endpoint
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {deploymentType === 'api' && (
+                      <div>
+                        <label htmlFor="modelClassName" className="block text-sm font-medium text-gray-700">
+                          Model Class Name
+                        </label>
+                        <input
+                          type="text"
+                          id="modelClassName"
+                          value={modelClassName}
+                          onChange={(e) => setModelClassName(e.target.value)}
+                          placeholder="e.g. ObjectDetector"
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          required={deploymentType === 'api'}
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          The name of the Python class in your notebook that implements the model
+                        </p>
+                      </div>
+                    )}
+                    
                     <div>
                       <label htmlFor="environment" className="block text-sm font-medium text-gray-700">
                         Environment
@@ -254,10 +386,37 @@ export default function NewDeploymentModal({
 
                   {status && (
                     <div className="mt-4 text-sm">
-                      <span className="font-medium">Status:</span>{' '}
+                      <span className="font-medium">Model Status:</span>{' '}
                       <span className={status === 'Deployed' ? 'text-green-600' : 'text-yellow-600'}>
                         {status}
                       </span>
+                    </div>
+                  )}
+                  
+                  {deploymentStatus && (
+                    <div className="mt-4 text-sm">
+                      <span className="font-medium">Deployment Status:</span>{' '}
+                      <span className={deploymentStatus === 'Deployed' ? 'text-green-600' : 'text-yellow-600'}>
+                        {deploymentStatus}
+                      </span>
+                    </div>
+                  )}
+                  
+                  {apiEndpoint && (
+                    <div className="mt-4 p-3 bg-green-50 rounded-md">
+                      <span className="block text-sm font-medium text-green-800">
+                        API Endpoint Created!
+                      </span>
+                      <a 
+                        href={apiEndpoint} 
+                        target="_blank" 
+                        className="mt-1 block text-sm text-blue-600 hover:text-blue-800 truncate"
+                      >
+                        {apiEndpoint}
+                      </a>
+                      <p className="mt-1 text-xs text-green-700">
+                        Your model has been deployed as an API endpoint. Add <code>/predict</code> to the URL for making predictions.
+                      </p>
                     </div>
                   )}
 
@@ -277,14 +436,16 @@ export default function NewDeploymentModal({
                     </button>
                     <button
                       type="submit"
-                      disabled={status !== 'Deployed'}
+                      disabled={(deploymentType === 'notebook' && status !== 'Deployed') || 
+                               (deploymentType === 'api' && (status !== 'Deployed' || !modelClassName))}
                       className={`inline-flex justify-center rounded-md border border-transparent px-4 py-2 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                        status === 'Deployed'
+                        (deploymentType === 'notebook' && status === 'Deployed') || 
+                        (deploymentType === 'api' && status === 'Deployed' && modelClassName)
                           ? 'bg-primary-600 hover:bg-primary-700'
                           : 'bg-gray-400 cursor-not-allowed'
                       }`}
                     >
-                      Deploy
+                      {deploymentStatus === 'Pending' ? 'Deploying...' : 'Deploy'}
                     </button>
                   </div>
                 </form>
