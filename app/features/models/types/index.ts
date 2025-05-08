@@ -15,6 +15,8 @@ export interface Model {
   lastUpdated: string;
   metrics: ModelMetrics;
   notebook_url?: string;
+  s3_url?: string;
+  s3_key?: string;
 }
 
 export interface AddModelData {
@@ -23,6 +25,8 @@ export interface AddModelData {
   version: string;
   file?: File;
   notebook_url?: string;
+  s3_url?: string;
+  s3_key?: string;
 }
 
 export interface UpdateModelData {
