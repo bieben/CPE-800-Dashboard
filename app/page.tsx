@@ -160,6 +160,12 @@ export default function Home() {
               actionText="Deploy Fedora"
               href="/deploy/fedora"
             />
+            <ActionCard
+              title="Predictive Analytics"
+              description="View resource usage forecasts and optimization recommendations"
+              actionText="View Predictions"
+              href="/predictive"
+            />
           </div>
         </div>
 

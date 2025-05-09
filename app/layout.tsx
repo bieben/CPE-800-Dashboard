@@ -4,6 +4,7 @@ import './globals.css';
 import { ModelProvider } from './features/models/context/ModelContext';
 import { AuthProvider } from './features/auth/contexts/AuthContext';
 import { DeploymentProvider } from './features/deployments/context/DeploymentContext';
+import { PredictiveProvider } from './features/analytics/context/PredictiveContext';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -23,7 +24,9 @@ export default function RootLayout({
         <AuthProvider>
           <ModelProvider>
             <DeploymentProvider>
-              {children}
+              <PredictiveProvider>
+                {children}
+              </PredictiveProvider>
             </DeploymentProvider>
           </ModelProvider>
         </AuthProvider>

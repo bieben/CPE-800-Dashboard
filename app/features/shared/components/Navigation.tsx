@@ -17,7 +17,9 @@ export default function Navigation() {
     { name: 'Home', href: '/' },
     { name: 'Models', href: '/models' },
     { name: 'Deployments', href: '/deployments' },
-    { name: 'Analytics', href: '/analytics' }
+    { name: 'Analytics', href: '/analytics' },
+    { name: 'Prediction', href: '/predictive' },
+    { name: 'Monitoring', href: '/monitoring' }
   ];
 
   return (

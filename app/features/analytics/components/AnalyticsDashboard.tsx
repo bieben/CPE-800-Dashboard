@@ -5,14 +5,14 @@ import { useModels } from '../../models/context/ModelContext';
 
 // Types
 interface ModelMetrics {
-  totalRequests: number;
+  predictRequests: number;
   avgLatency: number;
   activeModels: number;
   modelMetrics: Record<string, ModelStatus>;
 }
 
 interface ModelStatus {
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'unknown';
   metadata: {
     upload_time: string;
     feature_names: string[];
@@ -33,6 +33,12 @@ interface ModelStatus {
       };
     };
     deploy_time: string;
+    service?: {
+      url: string;
+      port: number;
+      health?: any;
+      uptime?: number;
+    };
   };
 }
 
@@ -54,6 +60,12 @@ interface PredictionState {
     model_stats: {
       total_predictions: number;
       avg_latency: number;
+    };
+    note?: string;
+    service_info?: {
+      url: string;
+      version?: string;
+      load?: number;
     };
   } | null;
 }
@@ -97,6 +109,42 @@ const ResourceInfo = ({ resources }: { resources: ModelStatus['deployment']['dep
   );
 };
 
+const ServiceInfo = ({ service }: { service: ModelStatus['deployment']['service'] }) => {
+  if (!service) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 bg-blue-50 p-3 rounded-md">
+      <h4 className="text-sm font-medium text-blue-900">Service Information</h4>
+      <div className="mt-2 space-y-2">
+        <div className="flex justify-between">
+          <span className="text-xs text-blue-700">Endpoint:</span>
+          <span className="text-sm font-medium text-blue-900">{service.url}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-blue-700">Port:</span>
+          <span className="text-sm font-medium text-blue-900">{service.port}</span>
+        </div>
+        {service.uptime !== undefined && (
+          <div className="flex justify-between">
+            <span className="text-xs text-blue-700">Uptime:</span>
+            <span className="text-sm font-medium text-blue-900">
+              {Math.floor(service.uptime / 86400)}d {Math.floor((service.uptime % 86400) / 3600)}h {Math.floor((service.uptime % 3600) / 60)}m
+            </span>
+          </div>
+        )}
+        {service.health && (
+          <div className="flex justify-between">
+            <span className="text-xs text-blue-700">Health:</span>
+            <span className="text-sm font-medium text-blue-900">{service.health.status || 'Unknown'}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const AlertItem = ({ alert }: { alert: Alert }) => (
   <div className={`p-4 rounded-lg ${
     alert.type === 'latency' ? 'bg-yellow-50' :
@@ -122,7 +170,7 @@ const AlertItem = ({ alert }: { alert: Alert }) => (
 export default function AnalyticsDashboard() {
   const { models } = useModels();
   const [metrics, setMetrics] = useState<ModelMetrics>({
-    totalRequests: 0,
+    predictRequests: 0,
     avgLatency: 0,
     activeModels: 0,
     modelMetrics: {},
@@ -141,27 +189,87 @@ export default function AnalyticsDashboard() {
 
   const fetchMetrics = async () => {
     try {
-      const [prometheusData, modelStatus] = await Promise.all([
+      const [prometheusData, modelStatusResponse] = await Promise.all([
         fetch('http://localhost:5000/metrics').then(res => res.text()),
         fetch('http://localhost:5000/models/status').then(res => res.json()),
       ]);
 
-      // Parse Prometheus metrics
-      const totalRequests = (prometheusData.match(/model_inference_requests_total{[^}]*} (\d+)/g) || [])
-        .reduce((sum, match) => sum + parseInt(match.match(/(\d+)$/)?.[1] || '0'), 0);
+      // Parse Prometheus metrics - 使用正确的指标名称
+      const predictRequestsRegex = /model_service_requests_total{endpoint="\/predict",model_id="([^"]+)"} (\d+\.\d+)/g;
+      let predictRequests = 0;
+      let match;
+      
+      while ((match = predictRequestsRegex.exec(prometheusData)) !== null) {
+        predictRequests += parseFloat(match[2]);
+      }
 
-      const latencyMatch = prometheusData.match(/model_inference_latency_seconds_sum{[^}]*} (\d+\.\d+)/);
-      const latencyCountMatch = prometheusData.match(/model_inference_latency_seconds_count{[^}]*} (\d+)/);
-      const avgLatency = latencyMatch && latencyCountMatch
-        ? parseFloat(latencyMatch[1]) / parseInt(latencyCountMatch[1])
-        : 0;
+      // 计算平均响应时间
+      let totalLatencySum = 0;
+      let totalLatencyCount = 0;
+      
+      const latencySumTotalRegex = /model_service_response_time_seconds_sum{[^}]*} (\d+\.\d+)/g;
+      const latencyCountTotalRegex = /model_service_response_time_seconds_count{[^}]*} (\d+\.\d+)/g;
+      
+      while ((match = latencySumTotalRegex.exec(prometheusData)) !== null) {
+        totalLatencySum += parseFloat(match[1]);
+      }
+      
+      while ((match = latencyCountTotalRegex.exec(prometheusData)) !== null) {
+        totalLatencyCount += parseFloat(match[1]);
+      }
+      
+      const avgLatency = totalLatencyCount > 0 ? totalLatencySum / totalLatencyCount : 0;
 
-      // Update metrics and check for alerts
-      const [statusData] = modelStatus;
-      const modelMetrics = statusData.models || {};
+      // 从 Prometheus 获取活跃服务指标
+      const activeServicesMatch = prometheusData.match(/active_model_services{[^}]*} (\d+)/);
+      const activeServices = activeServicesMatch ? parseInt(activeServicesMatch[1]) : 0;
+
+      // 解析各模型的预测请求计数
+      const modelRequestCounts: Record<string, number> = {};
+      const modelLatencySums: Record<string, number> = {};
+      const requestCountRegex = /model_service_requests_total{endpoint="\/predict",model_id="([^"]+)"} (\d+\.\d+)/g;
+      const latencySumRegex = /model_service_response_time_seconds_sum{endpoint="\/predict",model_id="([^"]+)"} (\d+\.\d+)/g;
+      
+      while ((match = requestCountRegex.exec(prometheusData)) !== null) {
+        const modelId = match[1];
+        const count = parseFloat(match[2]);
+        modelRequestCounts[modelId] = count;
+      }
+      
+      while ((match = latencySumRegex.exec(prometheusData)) !== null) {
+        const modelId = match[1];
+        const sum = parseFloat(match[2]);
+        modelLatencySums[modelId] = sum;
+      }
+      
+      // 正确解析API返回的数据格式
+      let modelMetrics = {};
+      if (Array.isArray(modelStatusResponse) && modelStatusResponse.length > 0) {
+        const [modelStatusData] = modelStatusResponse;
+        modelMetrics = modelStatusData?.models || {};
+        
+        // 更新模型统计数据，使用从metrics获取的预测次数
+        Object.entries(modelMetrics).forEach(([modelId, info]: [string, any]) => {
+          if (modelRequestCounts[modelId] !== undefined) {
+            info.performance.total_predictions = Math.floor(modelRequestCounts[modelId]);
+            
+            // 如果有请求数，更新最近预测时间
+            if (modelRequestCounts[modelId] > 0 && info.performance.last_prediction === 'Never') {
+              info.performance.last_prediction = new Date().toISOString();
+            }
+            
+            // 更新平均延迟
+            if (modelLatencySums[modelId] !== undefined && modelRequestCounts[modelId] > 0) {
+              info.performance.avg_latency_ms = (modelLatencySums[modelId] / modelRequestCounts[modelId]) * 1000;
+            }
+          }
+        });
+      } else {
+        console.warn('Unexpected model status response format:', modelStatusResponse);
+      }
       
       Object.entries(modelMetrics).forEach(([modelId, info]: [string, any]) => {
-        if (info.performance.avg_latency_ms > LATENCY_THRESHOLD) {
+        if (info?.performance?.avg_latency_ms > LATENCY_THRESHOLD) {
           setAlerts(prev => [
             ...prev.filter(a => !(a.modelId === modelId && a.type === 'latency')),
             {
@@ -175,9 +283,9 @@ export default function AnalyticsDashboard() {
       });
 
       setMetrics({
-        totalRequests,
+        predictRequests,
         avgLatency,
-        activeModels: Object.values(modelMetrics).filter((m: any) => m.status === 'active').length,
+        activeModels: activeServices || Object.values(modelMetrics).filter((m: any) => m.status === 'active').length,
         modelMetrics,
       });
     } catch (error) {
@@ -197,22 +305,55 @@ export default function AnalyticsDashboard() {
       const model = models.find(m => m.id === prediction.selectedModel);
       if (!model) throw new Error('Selected model not found');
 
+      const modelId = model.name.toLowerCase().replace(/\s+/g, '_');
+      
       const response = await fetch('http://localhost:5000/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model_id: model.name.toLowerCase().replace(/\s+/g, '_'),
+          model_id: modelId,
           features: Object.values(prediction.features),
         }),
       });
 
-      const [data, statusCode] = await response.json();
-      
-      if (statusCode === 500 || data.error) {
-        throw new Error(data.error || 'Prediction request failed');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Prediction failed with status: ${response.status}`);
       }
 
-      setPrediction(prev => ({ ...prev, result: data }));
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // 添加模型统计信息到预测结果
+      const enhancedData = {
+        ...data,
+        model_stats: {
+          total_predictions: 0,  // 这个会在刷新度量后更新
+          avg_latency: data.latency
+        }
+      };
+
+      setPrediction(prev => ({ ...prev, result: enhancedData }));
+      
+      // 成功预测后立即刷新度量数据，不使用延迟
+      await fetchMetrics();
+      
+      // 使用最新的指标更新预测结果中的统计信息
+      if (metrics.modelMetrics[modelId]) {
+        const updatedStats = {
+          ...enhancedData,
+          model_stats: {
+            total_predictions: metrics.modelMetrics[modelId]?.performance?.total_predictions || 0,
+            avg_latency: metrics.modelMetrics[modelId]?.performance?.avg_latency_ms 
+              ? metrics.modelMetrics[modelId].performance.avg_latency_ms / 1000 
+              : data.latency
+          }
+        };
+        setPrediction(prev => ({ ...prev, result: updatedStats }));
+      }
     } catch (error) {
       setPrediction(prev => ({
         ...prev,
@@ -256,7 +397,8 @@ export default function AnalyticsDashboard() {
       try {
         const response = await fetch('http://localhost:5000/models/status');
         const [data] = await response.json();
-        const modelInfo = data.models[model.name.toLowerCase().replace(/\s+/g, '_')];
+        const modelKey = model.name.toLowerCase().replace(/\s+/g, '_');
+        const modelInfo = data.models[modelKey];
         
         if (modelInfo?.metadata?.feature_names) {
           const features = modelInfo.metadata.feature_names;
@@ -340,7 +482,7 @@ export default function AnalyticsDashboard() {
       <div className="bg-white overflow-hidden shadow-sm rounded-lg p-6">
         <h2 className="text-xl font-semibold text-gray-900 mb-4">Performance Overview</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <MetricsCard title="Total Requests" value={metrics.totalRequests} />
+          <MetricsCard title="Total Predictions" value={Math.floor(metrics.predictRequests)} />
           <MetricsCard title="Average Latency" value={(metrics.avgLatency * 1000).toFixed(2)} unit="ms" />
           <MetricsCard title="Active Models" value={metrics.activeModels} />
         </div>
@@ -383,6 +525,9 @@ export default function AnalyticsDashboard() {
 
               {modelInfo?.deployment?.deploy_config && (
                 <ResourceInfo resources={modelInfo.deployment.deploy_config.resources} />
+              )}
+              {modelInfo?.deployment?.service && (
+                <ServiceInfo service={modelInfo.deployment.service} />
               )}
             </div>
           ))}
@@ -497,6 +642,13 @@ export default function AnalyticsDashboard() {
                         <span className="text-sm text-gray-500">Total Predictions: </span>
                         <span className="text-sm font-medium text-gray-900">
                           {prediction.result.model_stats.total_predictions.toLocaleString()}
+                          <button 
+                            onClick={fetchMetrics} 
+                            className="ml-2 text-xs text-blue-600 hover:text-blue-800"
+                            title="Refresh metrics"
+                          >
+                            ↻
+                          </button>
                         </span>
                       </div>
                       {prediction.result.model_stats.avg_latency > 0 && (
@@ -508,6 +660,45 @@ export default function AnalyticsDashboard() {
                         </div>
                       )}
                     </>
+                  )}
+                  {prediction.result.note && (
+                    <div>
+                      <span className="text-sm text-gray-500">Note: </span>
+                      <span className="text-sm italic text-gray-600">
+                        {prediction.result.note}
+                      </span>
+                    </div>
+                  )}
+                  {prediction.result.service_info && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <h5 className="text-sm font-medium text-gray-900">Service Information</h5>
+                      <div className="mt-1 space-y-1">
+                        {prediction.result.service_info.url && (
+                          <div>
+                            <span className="text-xs text-gray-500">Endpoint: </span>
+                            <span className="text-xs font-medium text-gray-700">
+                              {prediction.result.service_info.url}
+                            </span>
+                          </div>
+                        )}
+                        {prediction.result.service_info.version && (
+                          <div>
+                            <span className="text-xs text-gray-500">Version: </span>
+                            <span className="text-xs font-medium text-gray-700">
+                              {prediction.result.service_info.version}
+                            </span>
+                          </div>
+                        )}
+                        {prediction.result.service_info.load !== undefined && (
+                          <div>
+                            <span className="text-xs text-gray-500">Current Load: </span>
+                            <span className="text-xs font-medium text-gray-700">
+                              {prediction.result.service_info.load.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
