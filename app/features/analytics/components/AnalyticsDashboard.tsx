@@ -40,6 +40,19 @@ interface ModelStatus {
       uptime?: number;
     };
   };
+  resources?: {
+    cpu_usage_percent: number;
+    memory_usage_bytes: number;
+    memory_usage_percent: number;
+    network_io?: {
+      read_bytes: number;
+      write_bytes: number;
+    };
+    network_io_rate?: number;
+    pid?: number;
+    port?: number;
+    uptime?: number;
+  };
 }
 
 interface Alert {
@@ -84,8 +97,11 @@ const MetricsCard = ({ title, value, unit = '' }: { title: string; value: number
   </div>
 );
 
-const ResourceInfo = ({ resources }: { resources: ModelStatus['deployment']['deploy_config']['resources'] }) => {
-  if (!resources) {
+const ResourceInfo = ({ resources, modelResources }: { 
+  resources: ModelStatus['deployment']['deploy_config']['resources'], 
+  modelResources?: ModelStatus['resources'] 
+}) => {
+  if (!resources && !modelResources) {
     return (
       <div className="mt-4">
         <h4 className="text-sm font-medium text-gray-900">Resources</h4>
@@ -98,12 +114,37 @@ const ResourceInfo = ({ resources }: { resources: ModelStatus['deployment']['dep
     <div className="mt-4">
       <h4 className="text-sm font-medium text-gray-900">Resources</h4>
       <div className="mt-2 grid grid-cols-3 gap-4">
-        {Object.entries(resources).map(([key, value]) => (
+        {resources && Object.entries(resources).map(([key, value]) => (
           <div key={key}>
-            <p className="text-xs text-gray-500">{key.toUpperCase()}</p>
+            <p className="text-xs text-gray-500">{key.toUpperCase()} (Allocated)</p>
             <p className="text-sm font-medium text-gray-900">{value || 'N/A'}</p>
           </div>
         ))}
+        
+        {modelResources && (
+          <>
+            <div>
+              <p className="text-xs text-gray-500">CPU (Usage)</p>
+              <p className="text-sm font-medium text-gray-900">{modelResources.cpu_usage_percent?.toFixed(2) || 0}%</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">MEMORY (Usage)</p>
+              <p className="text-sm font-medium text-gray-900">
+                {modelResources.memory_usage_bytes 
+                  ? `${(modelResources.memory_usage_bytes / (1024 * 1024)).toFixed(2)} MB (${modelResources.memory_usage_percent?.toFixed(2)}%)`
+                  : 'N/A'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">NETWORK (I/O)</p>
+              <p className="text-sm font-medium text-gray-900">
+                {modelResources.network_io_rate !== undefined 
+                  ? `${(modelResources.network_io_rate / 1024).toFixed(2)} KB/s`
+                  : 'N/A'}
+              </p>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -189,9 +230,10 @@ export default function AnalyticsDashboard() {
 
   const fetchMetrics = async () => {
     try {
-      const [prometheusData, modelStatusResponse] = await Promise.all([
+      const [prometheusData, modelStatusResponse, modelResourcesResponse] = await Promise.all([
         fetch('http://localhost:5000/metrics').then(res => res.text()),
         fetch('http://localhost:5000/models/status').then(res => res.json()),
+        fetch('http://localhost:5000/models/resources').then(res => res.json()),
       ]);
 
       // Parse Prometheus metrics - 使用正确的指标名称
@@ -243,31 +285,96 @@ export default function AnalyticsDashboard() {
       }
       
       // 正确解析API返回的数据格式
-      let modelMetrics = {};
+      let modelMetrics: Record<string, any> = {};
+      
+      console.log('Model status response:', modelStatusResponse);
+      
+      // 处理不同的API响应格式
       if (Array.isArray(modelStatusResponse) && modelStatusResponse.length > 0) {
+        // 格式1: 数组，第一个元素包含models对象
         const [modelStatusData] = modelStatusResponse;
-        modelMetrics = modelStatusData?.models || {};
-        
-        // 更新模型统计数据，使用从metrics获取的预测次数
-        Object.entries(modelMetrics).forEach(([modelId, info]: [string, any]) => {
-          if (modelRequestCounts[modelId] !== undefined) {
-            info.performance.total_predictions = Math.floor(modelRequestCounts[modelId]);
-            
-            // 如果有请求数，更新最近预测时间
-            if (modelRequestCounts[modelId] > 0 && info.performance.last_prediction === 'Never') {
-              info.performance.last_prediction = new Date().toISOString();
-            }
-            
-            // 更新平均延迟
-            if (modelLatencySums[modelId] !== undefined && modelRequestCounts[modelId] > 0) {
-              info.performance.avg_latency_ms = (modelLatencySums[modelId] / modelRequestCounts[modelId]) * 1000;
+        if (modelStatusData?.models) {
+          modelMetrics = modelStatusData.models;
+        }
+      } else if (modelStatusResponse?.models) {
+        // 格式2: 直接包含models对象
+        modelMetrics = modelStatusResponse.models;
+      } else if (typeof modelStatusResponse === 'object' && modelStatusResponse !== null) {
+        // 格式3: 本身就是模型状态的映射或其他格式
+        if (Object.keys(modelStatusResponse).some(key => 
+          typeof modelStatusResponse[key] === 'object' && 
+          (modelStatusResponse[key]?.status || modelStatusResponse[key]?.metadata)
+        )) {
+          // 找到看起来像模型状态对象的键值
+          for (const key in modelStatusResponse) {
+            const value = modelStatusResponse[key];
+            if (
+              value && 
+              typeof value === 'object' && 
+              (value.status || value.metadata || value.performance)
+            ) {
+              modelMetrics[key] = value;
             }
           }
-        });
+        } else {
+          // 如果没有找到适合的结构，使用整个响应
+          modelMetrics = modelStatusResponse;
+        }
       } else {
         console.warn('Unexpected model status response format:', modelStatusResponse);
+        // 创建一个默认的空的模型指标对象以防止错误
+        modelMetrics = {};
       }
       
+      // 处理资源使用信息
+      console.log('Model resources response:', modelResourcesResponse);
+      if (modelResourcesResponse?.data && typeof modelResourcesResponse.data === 'object') {
+        // 删除系统级别的指标，只保留模型级别的指标
+        const { system, ...modelResources } = modelResourcesResponse.data;
+        
+        // 将资源信息添加到每个模型的指标中
+        Object.entries(modelResources).forEach(([modelId, resourceData]: [string, any]) => {
+          if (modelMetrics[modelId]) {
+            modelMetrics[modelId].resources = resourceData;
+          }
+        });
+      }
+      
+      // 确保每个模型条目都有所需的结构
+      Object.entries(modelMetrics).forEach(([modelId, info]: [string, any]) => {
+        // 如果模型信息不完整，添加默认结构
+        if (!info.performance) {
+          info.performance = {
+            total_predictions: 0,
+            avg_latency_ms: 0,
+            last_prediction: 'Never'
+          };
+        }
+        
+        if (!info.metadata) {
+          info.metadata = {
+            upload_time: 'Unknown',
+            feature_names: [],
+            feature_count: 0
+          };
+        }
+        
+        // 更新模型统计数据，使用从metrics获取的预测次数
+        if (modelRequestCounts[modelId] !== undefined) {
+          info.performance.total_predictions = Math.floor(modelRequestCounts[modelId]);
+          
+          // 如果有请求数，更新最近预测时间
+          if (modelRequestCounts[modelId] > 0 && info.performance.last_prediction === 'Never') {
+            info.performance.last_prediction = new Date().toISOString();
+          }
+          
+          // 更新平均延迟
+          if (modelLatencySums[modelId] !== undefined && modelRequestCounts[modelId] > 0) {
+            info.performance.avg_latency_ms = (modelLatencySums[modelId] / modelRequestCounts[modelId]) * 1000;
+          }
+        }
+      });
+
       Object.entries(modelMetrics).forEach(([modelId, info]: [string, any]) => {
         if (info?.performance?.avg_latency_ms > LATENCY_THRESHOLD) {
           setAlerts(prev => [
@@ -396,9 +503,30 @@ export default function AnalyticsDashboard() {
     if (model) {
       try {
         const response = await fetch('http://localhost:5000/models/status');
-        const [data] = await response.json();
+        const responseData = await response.json();
+        console.log('API Response in handleModelSelect:', responseData);
+        
         const modelKey = model.name.toLowerCase().replace(/\s+/g, '_');
-        const modelInfo = data.models[modelKey];
+        
+        // 灵活处理不同的API响应格式
+        let modelInfo = null;
+        
+        // 格式1: 数组格式，第一个元素包含models对象
+        if (Array.isArray(responseData) && responseData.length > 0) {
+          if (responseData[0]?.models && responseData[0].models[modelKey]) {
+            modelInfo = responseData[0].models[modelKey];
+          }
+        } 
+        // 格式2: 直接包含models对象
+        else if (responseData?.models && responseData.models[modelKey]) {
+          modelInfo = responseData.models[modelKey];
+        }
+        // 格式3: 本身就是模型状态的映射
+        else if (typeof responseData === 'object' && responseData !== null) {
+          if (responseData[modelKey]) {
+            modelInfo = responseData[modelKey];
+          }
+        }
         
         if (modelInfo?.metadata?.feature_names) {
           const features = modelInfo.metadata.feature_names;
@@ -524,7 +652,10 @@ export default function AnalyticsDashboard() {
               </div>
 
               {modelInfo?.deployment?.deploy_config && (
-                <ResourceInfo resources={modelInfo.deployment.deploy_config.resources} />
+                <ResourceInfo 
+                  resources={modelInfo.deployment.deploy_config.resources} 
+                  modelResources={modelInfo.resources}
+                />
               )}
               {modelInfo?.deployment?.service && (
                 <ServiceInfo service={modelInfo.deployment.service} />

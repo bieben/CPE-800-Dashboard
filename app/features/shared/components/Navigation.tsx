@@ -18,7 +18,7 @@ export default function Navigation() {
     { name: 'Models', href: '/models' },
     { name: 'Deployments', href: '/deployments' },
     { name: 'Analytics', href: '/analytics' },
-    { name: 'Prediction', href: '/predictive' },
+    { name: 'Prediction', href: '/prediction' },
     { name: 'Monitoring', href: '/monitoring' }
   ];
 

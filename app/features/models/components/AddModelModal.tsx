@@ -19,7 +19,7 @@ export default function AddModelModal({
   const [description, setDescription] = useState('');
   const [version, setVersion] = useState('1.0.0');
   const [file, setFile] = useState<File | null>(null);
-  const [modelType, setModelType] = useState<'notebook' | 'pickle'>('notebook');
+  const [modelType, setModelType] = useState<'notebook' | 'pickle'>('pickle');
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,7 +125,7 @@ export default function AddModelModal({
       setVersion('1.0.0');
       setFile(null);
       setError(null);
-      setModelType('notebook');
+      setModelType('pickle');
     }
   }, [isOpen]);
 
@@ -173,8 +173,8 @@ export default function AddModelModal({
                       onChange={(e) => setModelType(e.target.value as 'notebook' | 'pickle')}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                     >
-                      <option value="notebook">Jupyter Notebook (.ipynb)</option>
                       <option value="pickle">Pickle Model (.pkl)</option>
+                      <option value="notebook">Jupyter Notebook (.ipynb)</option>
                     </select>
                   </div>
 

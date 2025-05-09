@@ -110,19 +110,44 @@ export default function DeploymentsList() {
       });
 
       // Get updated model status from monitoring system
-      const statusResponse = await fetch('http://localhost:5000/models/status');
-      if (statusResponse.ok) {
-        const statusData = await statusResponse.json();
-        const modelStatus = statusData[0].models[backendModelId];
-        if (modelStatus) {
-          updateModel(modelId, {
-            metrics: {
+      try {
+        const statusResponse = await fetch('http://localhost:5000/models/status');
+        if (statusResponse.ok) {
+          const statusData = await statusResponse.json();
+          console.log('Model status response in handleDeploy:', statusData);
+          
+          // 尝试从不同格式的响应中获取模型状态
+          let modelStatus: any = null;
+          
+          // 处理不同格式的响应结构
+          if (Array.isArray(statusData) && statusData.length > 0) {
+            // 格式1: 响应是数组
+            if (statusData[0]?.models && statusData[0].models[backendModelId]) {
+              modelStatus = statusData[0].models[backendModelId];
+            }
+          } else if (statusData?.models && statusData.models[backendModelId]) {
+            // 格式2: 响应包含models对象
+            modelStatus = statusData.models[backendModelId];
+          } else if (typeof statusData === 'object' && statusData !== null) {
+            // 格式3: 直接包含模型ID作为键
+            if (statusData[backendModelId]) {
+              modelStatus = statusData[backendModelId];
+            }
+          }
+          
+          if (modelStatus) {
+            const metrics = {
               requests: modelStatus.performance?.total_predictions || 0,
               latency: `${modelStatus.performance?.avg_latency_ms || 0}ms`,
               accuracy: modelStatus.performance?.accuracy || '0%'
-            }
-          });
+            };
+            
+            updateModel(modelId, { metrics });
+          }
         }
+      } catch (statusError) {
+        console.warn('Error fetching model status after deployment:', statusError);
+        // 这不会影响部署过程，只是日志记录
       }
 
     } catch (error) {

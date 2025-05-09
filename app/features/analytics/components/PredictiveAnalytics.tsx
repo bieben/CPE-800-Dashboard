@@ -11,14 +11,12 @@ const PredictiveAnalytics: React.FC = () => {
   const { 
     predictions,
     optimizationResults,
-    currentMetrics,
     alerts,
     lastUpdated,
     isLoading,
     error,
     fetchPredictions,
-    triggerPrediction,
-    fetchSystemMetrics
+    triggerPrediction
   } = usePredictive();
   
   const [predictionSettings, setPredictionSettings] = useState<PredictionTriggerOptions>({
@@ -31,16 +29,12 @@ const PredictiveAnalytics: React.FC = () => {
   // Check if data needs to be loaded when component mounts
   useEffect(() => {
     // Not loading data automatically, waiting for user to trigger manually
-    // Just setting state to indicate component has initialized
     setDataLoaded(false);
   }, []);
   
   const handleRefresh = () => {
     fetchPredictions().catch(err => {
       console.error("Error fetching predictions:", err);
-    });
-    fetchSystemMetrics().catch(err => {
-      console.error("Error fetching metrics:", err);
     });
     setDataLoaded(true);
   };
@@ -112,39 +106,7 @@ const PredictiveAnalytics: React.FC = () => {
         </div>
       )}
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {currentMetrics.length > 0 ? (
-          currentMetrics.map((metric, index) => (
-            <div key={index} className={`p-6 rounded-lg shadow-sm 
-              ${metric.status === 'normal' ? 'bg-white' : 
-                metric.status === 'warning' ? 'bg-yellow-50' : 'bg-red-50'}`}>
-              <h3 className="text-sm font-medium text-gray-500 uppercase">{metric.name}</h3>
-              <div className="mt-2 flex items-baseline">
-                <span className={`text-3xl font-semibold 
-                  ${metric.status === 'normal' ? 'text-gray-900' : 
-                    metric.status === 'warning' ? 'text-yellow-800' : 'text-red-800'}`}>
-                  {metric.value.toFixed(2)}
-                </span>
-                <span className="ml-1 text-sm text-gray-500">{metric.unit}</span>
-              </div>
-            </div>
-          ))
-        ) : (
-          // Display empty state metric cards
-          Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="p-6 rounded-lg shadow-sm bg-white">
-              <h3 className="text-sm font-medium text-gray-500 uppercase">
-                {index === 0 ? 'CPU Usage' : index === 1 ? 'Memory Usage' : 'Network Traffic'}
-              </h3>
-              <div className="mt-2 flex items-baseline">
-                <span className="text-3xl font-semibold text-gray-300">--</span>
-                <span className="ml-1 text-sm text-gray-300">%</span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-      
+      {/* Prediction Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {Object.keys(predictions).length > 0 ? (
           Object.entries(predictions).map(([resourceName, predictionData]) => (
@@ -176,6 +138,7 @@ const PredictiveAnalytics: React.FC = () => {
         )}
       </div>
       
+      {/* Optimization and Alerts Section */}
       <div className="grid grid-cols-1 gap-6">
         <OptimizationResults 
           results={optimizationResults}

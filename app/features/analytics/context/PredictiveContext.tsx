@@ -109,10 +109,12 @@ export const PredictiveProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           unit: '%'
         }, {
           resource_type: 'Network',
-          current_allocation: optimizationData.utilization?.network || 0,
+          current_allocation: Array.isArray(predictionsArray) && predictionsArray.length > 0 
+            ? Number(predictionsArray[0].network_io_real) || 0
+            : 0,
           suggested_allocation: optimizationData.network_allocation || 0,
           estimated_savings: 0,
-          unit: '%'
+          unit: 'KB/s'
         }]);
         
         setLastUpdated(data.data.timestamp || new Date().toISOString());
@@ -184,7 +186,8 @@ export const PredictiveProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setIsLoading(true);
     
     try {
-      const response = await fetch('http://localhost:5001/api/v1/predictions/latest');
+      // 使用实际系统指标API而不是预测API
+      const response = await fetch('http://localhost:5001/api/v1/metrics');
       
       if (!response.ok) {
         throw new Error(`Error fetching metrics: ${response.statusText}`);
@@ -195,31 +198,40 @@ export const PredictiveProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const data = JSON.parse(sanitizedText);
       
       if (data.status === 'success' && data.data) {
-        const utilization = data.data.optimization?.utilization || {};
+        // API返回的是数组，我们使用最新的一条数据
+        const latestMetrics = Array.isArray(data.data) && data.data.length > 0 
+          ? data.data[data.data.length - 1]  // 获取数组中的最后一项（最新数据）
+          : {};
+        
+        console.log('Latest metrics data:', latestMetrics);
         
         // 将原始指标转换为ResourceMetric格式
         const metricItems: ResourceMetric[] = [
           {
             name: 'CPU Usage',
-            value: Number(utilization.cpu) || 0,
+            value: Number(latestMetrics.cpu_usage_real) || 0,
             unit: '%',
-            status: Number(utilization.cpu) > 80 ? 'critical' : Number(utilization.cpu) > 60 ? 'warning' : 'normal'
+            status: Number(latestMetrics.cpu_usage_real) > 80 ? 'critical' : Number(latestMetrics.cpu_usage_real) > 60 ? 'warning' : 'normal'
           },
           {
             name: 'Memory Usage',
-            value: Number(utilization.memory) || 0,
+            value: Number(latestMetrics.memory_usage_real) || 0,
             unit: '%',
-            status: Number(utilization.memory) > 90 ? 'critical' : Number(utilization.memory) > 75 ? 'warning' : 'normal'
+            status: Number(latestMetrics.memory_usage_real) > 90 ? 'critical' : Number(latestMetrics.memory_usage_real) > 75 ? 'warning' : 'normal'
           },
           {
-            name: 'Network Usage',
-            value: Number(utilization.network) || 0,
-            unit: '%',
-            status: Number(utilization.network) > 90 ? 'critical' : Number(utilization.network) > 75 ? 'warning' : 'normal'
+            name: 'Network Traffic',
+            value: Number(latestMetrics.network_io_real) || 0,
+            unit: 'KB/s',
+            status: Number(latestMetrics.network_io_real) > 2000 ? 'critical' : Number(latestMetrics.network_io_real) > 1500 ? 'warning' : 'normal'
           }
         ];
         
         setCurrentMetrics(metricItems);
+        // 更新最后获取时间
+        setLastUpdated(latestMetrics.timestamp || new Date().toISOString());
+      } else {
+        console.warn('Invalid metrics data format:', data);
       }
     } catch (err) {
       console.error('Error fetching system metrics:', err);

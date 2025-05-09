@@ -8,6 +8,7 @@ import HealthStatusPanel from '@/features/monitoring/components/HealthStatusPane
 import AlertsPanel from '@/features/monitoring/components/AlertsPanel';
 import MetricsPanel from '@/features/monitoring/components/MetricsPanel';
 import LogsPanel, { getMockLogs } from '@/features/monitoring/components/LogsPanel';
+import ModelDetailsPanel from '@/features/monitoring/components/ModelDetailsPanel';
 
 import { 
   getHealthStatus, 
@@ -98,7 +99,7 @@ const MonitoringPage = () => {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Model Service Monitoring</h1>
         <div className="flex items-center gap-2">
@@ -146,6 +147,9 @@ const MonitoringPage = () => {
             metrics={metrics} 
             loading={loading.metrics} 
           />
+          <ModelDetailsPanel
+            loading={loading.metrics}
+          />
         </TabsContent>
 
         <TabsContent value="metrics" className="space-y-4">
@@ -170,7 +174,7 @@ const MonitoringPage = () => {
           />
         </TabsContent>
       </Tabs>
-    </div>
+    </main>
   );
 };
 

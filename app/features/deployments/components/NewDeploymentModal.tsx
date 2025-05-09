@@ -19,7 +19,9 @@ export default function NewDeploymentModal({
   onDeploy,
   availableEnvironments,
 }: NewDeploymentModalProps) {
-  const { models } = useModels();
+  const modelsContext = useModels();
+  const models = modelsContext?.models || [];
+  
   const { updateDeployment, deployments } = useDeployments();
   const [selectedModel, setSelectedModel] = useState('');
   const [environment, setEnvironment] = useState<DeploymentEnvironment>(availableEnvironments[0]);
@@ -31,6 +33,10 @@ export default function NewDeploymentModal({
   // Check model status
   const checkModelStatus = async (modelId: string) => {
     try {
+      if (!models || models.length === 0) {
+        throw new Error('No models available');
+      }
+      
       const model = models.find(m => m.id === modelId);
       if (!model) {
         throw new Error('Model not found');
@@ -44,19 +50,66 @@ export default function NewDeploymentModal({
       }
 
       const statusData = await response.json();
-      const modelStatus = statusData[0].models[backendModelId];
+      console.log('API Response for model status:', statusData);
+      
+      // 灵活处理不同的API响应格式
+      let modelsData: any = {};
+      
+      // 情况1: 数组格式，第一个元素包含models对象
+      if (Array.isArray(statusData) && statusData.length > 0 && statusData[0]?.models) {
+        modelsData = statusData[0].models;
+      } 
+      // 情况2: 直接包含models对象
+      else if (statusData?.models) {
+        modelsData = statusData.models;
+      }
+      // 情况3: 本身就是模型状态的映射
+      else if (typeof statusData === 'object' && statusData !== null) {
+        // 尝试找出是否有任何键匹配我们的backendModelId
+        if (statusData[backendModelId]) {
+          modelsData = { [backendModelId]: statusData[backendModelId] };
+        } else {
+          // 如果没有直接匹配，检查所有顶级对象是否类似于模型状态
+          for (const key in statusData) {
+            const value = statusData[key];
+            if (value && typeof value === 'object' && (value.status || value.metadata)) {
+              modelsData[key] = value;
+            }
+          }
+        }
+      }
+      
+      // 检查是否找到了任何模型数据
+      if (Object.keys(modelsData).length === 0) {
+        throw new Error('No model status information found in API response');
+      }
+      
+      const modelStatus = modelsData[backendModelId];
 
       if (!modelStatus) {
         throw new Error(`Model ${model.name} is not uploaded to the monitoring system. Please upload it first.`);
       }
 
-      // Check model status and provide specific error information
-      if (!modelStatus.metadata || !modelStatus.metadata.feature_names) {
-        throw new Error(`Model ${model.name} metadata is incomplete. Please check the model file.`);
+      // 检查状态对象是否有必要的字段
+      if (!modelStatus.metadata) {
+        // 如果没有metadata字段，但有其他可用信息，则尝试继续
+        modelStatus.metadata = { 
+          feature_names: ['unknown'], 
+          feature_count: 0,
+          upload_time: new Date().toISOString()
+        };
+      }
+      
+      if (!modelStatus.metadata.feature_names) {
+        modelStatus.metadata.feature_names = ['unknown'];
+      }
+      
+      if (!modelStatus.metadata.feature_count) {
+        modelStatus.metadata.feature_count = modelStatus.metadata.feature_names.length || 0;
       }
 
-      if (modelStatus.status === 'failed') {
-        throw new Error(`Model ${model.name} is in failed state. Please check the model logs.`);
+      if (!modelStatus.status) {
+        modelStatus.status = 'unknown';
       }
 
       // Allow deployment for both inactive and active models
@@ -65,7 +118,7 @@ export default function NewDeploymentModal({
       } else if (modelStatus.status === 'active') {
         setStatus(`Active (${modelStatus.metadata.feature_count} features)`);
       } else {
-        throw new Error(`Model ${model.name} is in ${modelStatus.status} state. Please check the model status.`);
+        setStatus(`Status: ${modelStatus.status} (${modelStatus.metadata.feature_count} features)`);
       }
 
       return {
@@ -73,7 +126,11 @@ export default function NewDeploymentModal({
         model,
         backendModelId,
         metadata: modelStatus.metadata,
-        performance: modelStatus.performance
+        performance: modelStatus.performance || { 
+          total_predictions: 0,
+          avg_latency_ms: 0,
+          last_prediction: 'Never'
+        }
       };
     } catch (error) {
       console.error('Error checking model status:', error);
@@ -89,6 +146,11 @@ export default function NewDeploymentModal({
     setLoading(true);
 
     try {
+      // 检查是否有models可用
+      if (!models || models.length === 0) {
+        throw new Error('No models available');
+      }
+      
       // Check if the model is ready for deployment
       const statusCheck = await checkModelStatus(selectedModel);
       if (!statusCheck.isReady) {
@@ -111,7 +173,7 @@ export default function NewDeploymentModal({
     setError(null);
     setStatus(null);
 
-    if (modelId) {
+    if (modelId && models && models.length > 0) {
       await checkModelStatus(modelId);
     }
   };
@@ -122,6 +184,11 @@ export default function NewDeploymentModal({
       setLoading(true);
       setError(null);
 
+      if (!models || models.length === 0) {
+        setDeployments([]);
+        return;
+      }
+
       // Get deployment status for each model
       const deploymentPromises = models.map(async (model) => {
         try {
@@ -131,11 +198,40 @@ export default function NewDeploymentModal({
           }
           const data = await response.json();
           
+          // 尝试从不同格式的API响应中获取状态
+          let status = 'unknown';
+          
+          // 如果是数组格式，取第一个元素
+          if (Array.isArray(data) && data.length > 0) {
+            const modelData = data[0];
+            
+            // 尝试获取指定模型的状态
+            const backendModelId = model.model_id || model.name.toLowerCase().replace(/\s+/g, '_');
+            if (modelData.models && modelData.models[backendModelId]) {
+              status = modelData.models[backendModelId].status || 'unknown';
+            } 
+            // 直接使用整个响应的状态
+            else if (modelData.status) {
+              status = modelData.status;
+            }
+          }
+          // 如果是对象格式
+          else if (typeof data === 'object' && data !== null) {
+            if (data.status) {
+              status = data.status;
+            } else if (data.models) {
+              const backendModelId = model.model_id || model.name.toLowerCase().replace(/\s+/g, '_');
+              if (data.models[backendModelId]) {
+                status = data.models[backendModelId].status || 'unknown';
+              }
+            }
+          }
+          
           return {
             id: model.id,
             modelId: model.id,
             environment: 'Development',
-            status: data.status,
+            status: status,
             createdAt: new Date().toISOString(),
             lastUpdated: new Date().toISOString()
           };
@@ -156,9 +252,11 @@ export default function NewDeploymentModal({
 
   // Initial load and periodic refresh
   useEffect(() => {
-    fetchDeployments();
-    const interval = setInterval(fetchDeployments, 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
+    if (models && models.length > 0) {
+      fetchDeployments();
+      const interval = setInterval(fetchDeployments, 30000); // Refresh every 30 seconds
+      return () => clearInterval(interval);
+    }
   }, [models]);
 
   return (
@@ -208,11 +306,15 @@ export default function NewDeploymentModal({
                         required
                       >
                         <option value="">Select a model</option>
-                        {models.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.name} (v{model.version})
-                          </option>
-                        ))}
+                        {models && models.length > 0 ? (
+                          models.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.name} (v{model.version})
+                            </option>
+                          ))
+                        ) : (
+                          <option value="" disabled>No models available</option>
+                        )}
                       </select>
                     </div>
                     <div>
