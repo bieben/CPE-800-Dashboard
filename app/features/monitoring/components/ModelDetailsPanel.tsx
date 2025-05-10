@@ -48,31 +48,43 @@ const ModelDetailsPanel: React.FC<ModelDetailsProps> = ({ loading }) => {
   
   const fetchModelStatuses = async () => {
     try {
-      const response = await fetch('http://localhost:5000/models/status');
+      // 使用真实API获取模型状态
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${API_BASE_URL}/models/status`);
       
       if (!response.ok) {
-        throw new Error('Failed to fetch model statuses');
+        throw new Error(`Error fetching model statuses: ${response.statusText}`);
       }
       
-      const statusData = await response.json();
-      console.log('API Response for model statuses:', statusData);
+      // 防止JSON解析错误
+      const text = await response.text();
+      // 处理NaN值和其他可能导致JSON解析错误的内容
+      const sanitizedText = text.replace(/: ?NaN/g, ': 0')
+                               .replace(/: ?Infinity/g, ': 1e6')
+                               .replace(/: ?-Infinity/g, ': -1e6');
       
-      // 灵活处理不同的API响应格式
+      let data;
+      try {
+        data = JSON.parse(sanitizedText);
+      } catch (e) {
+        console.error('JSON parse error:', e, 'Raw response:', text);
+        throw new Error('Invalid JSON response from server');
+      }
+      
+      console.log('API Response for model statuses:', data);
+      
+      // 处理不同的API响应格式
       let modelsData: Record<string, ModelStatus> = {};
       
-      // 情况1: 数组格式，第一个元素包含models对象
-      if (Array.isArray(statusData) && statusData.length > 0 && statusData[0]?.models) {
-        modelsData = statusData[0].models;
+      // 如果有models对象
+      if (data.models) {
+        modelsData = data.models;
       } 
-      // 情况2: 直接包含models对象
-      else if (statusData?.models) {
-        modelsData = statusData.models;
-      }
-      // 情况3: 本身就是模型状态的映射
-      else if (typeof statusData === 'object' && statusData !== null) {
+      // 如果本身就是模型状态的映射
+      else if (typeof data === 'object' && data !== null) {
         // 检查所有顶级对象是否类似于模型状态
-        for (const key in statusData) {
-          const value = statusData[key];
+        for (const key in data) {
+          const value = data[key];
           if (value && typeof value === 'object' && (value.status || value.metadata)) {
             modelsData[key] = value as ModelStatus;
           }
@@ -80,15 +92,35 @@ const ModelDetailsPanel: React.FC<ModelDetailsProps> = ({ loading }) => {
       }
       
       setModelStatuses(modelsData);
+      setError(null);
     } catch (err) {
       console.error('Error fetching model statuses:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch model statuses');
+      
+      // 如果API无法访问，仍然显示前端知道的模型，但显示其状态为未知
+      const fallbackStatuses: Record<string, ModelStatus> = {};
+      models.forEach(model => {
+        fallbackStatuses[model.model_id || model.name.toLowerCase().replace(/\s+/g, '_')] = {
+          status: 'unknown',
+          metadata: {
+            upload_time: 'Unknown',
+            feature_names: [],
+            feature_count: 0
+          },
+          performance: {
+            total_predictions: 0,
+            avg_latency_ms: 0,
+            last_prediction: 'Never'
+          }
+        };
+      });
+      setModelStatuses(fallbackStatuses);
     }
   };
   
   useEffect(() => {
     fetchModelStatuses();
-    const interval = setInterval(fetchModelStatuses, 30000); // Refresh every 30 seconds
+    const interval = setInterval(fetchModelStatuses, 30000); // 每30秒刷新一次
     return () => clearInterval(interval);
   }, []);
   
@@ -124,7 +156,7 @@ const ModelDetailsPanel: React.FC<ModelDetailsProps> = ({ loading }) => {
     );
   }
 
-  // Map our frontend models to their backend status
+  // 将前端模型与后端状态匹配
   const modelsWithStatus = models.map(model => {
     const backendModelId = model.model_id || model.name.toLowerCase().replace(/\s+/g, '_');
     const status = modelStatuses[backendModelId] || { status: 'unknown' };
@@ -152,8 +184,19 @@ const ModelDetailsPanel: React.FC<ModelDetailsProps> = ({ loading }) => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Model Details</CardTitle>
-        <CardDescription>Status and metrics for all registered models</CardDescription>
+        <div className="flex justify-between items-center">
+          <div>
+            <CardTitle>Model Details</CardTitle>
+            <CardDescription>Status and metrics for all registered models</CardDescription>
+          </div>
+          <button
+            onClick={fetchModelStatuses}
+            className="p-2 rounded-full hover:bg-gray-100"
+            disabled={loading}
+          >
+            <span className={`inline-block ${loading ? 'animate-spin' : ''}`}>⟳</span>
+          </button>
+        </div>
       </CardHeader>
       <CardContent>
         {modelsWithStatus.length > 0 ? (
@@ -168,6 +211,7 @@ const ModelDetailsPanel: React.FC<ModelDetailsProps> = ({ loading }) => {
                   <Badge variant={
                     model.backendStatus.status === 'active' ? 'success' : 
                     model.backendStatus.status === 'inactive' ? 'secondary' : 
+                    model.backendStatus.status === 'unknown' ? 'outline' :
                     'destructive'
                   }>
                     {model.backendStatus.status}

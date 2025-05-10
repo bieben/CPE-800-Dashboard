@@ -222,7 +222,7 @@ export const PredictiveProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           {
             name: 'Network Traffic',
             value: Number(latestMetrics.network_io_real) || 0,
-            unit: 'KB/s',
+            unit: 'B/s',
             status: Number(latestMetrics.network_io_real) > 2000 ? 'critical' : Number(latestMetrics.network_io_real) > 1500 ? 'warning' : 'normal'
           }
         ];

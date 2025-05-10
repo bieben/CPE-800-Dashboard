@@ -6,8 +6,9 @@ import { Alert, AlertDescription, AlertTitle } from '@/features/shared/component
 
 import HealthStatusPanel from '@/features/monitoring/components/HealthStatusPanel';
 import AlertsPanel from '@/features/monitoring/components/AlertsPanel';
+import AlertConfigPanel from '@/features/monitoring/components/AlertConfigPanel';
 import MetricsPanel from '@/features/monitoring/components/MetricsPanel';
-import LogsPanel, { getMockLogs } from '@/features/monitoring/components/LogsPanel';
+import LogsPanel from '@/features/monitoring/components/LogsPanel';
 import ModelDetailsPanel from '@/features/monitoring/components/ModelDetailsPanel';
 
 import { 
@@ -26,13 +27,12 @@ const MonitoringPage = () => {
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [alerts, setAlerts] = useState<AlertRule[]>([]);
-  const [logs, setLogs] = useState(getMockLogs());
   
   const [loading, setLoading] = useState({
     health: true,
     metrics: true,
     alerts: true,
-    logs: true
+    logs: false
   });
   
   const [error, setError] = useState<string | null>(null);
@@ -43,39 +43,52 @@ const MonitoringPage = () => {
       health: true,
       metrics: true,
       alerts: true,
-      logs: true
+      logs: false // 日志加载状态将由LogsPanel组件自己管理
     });
     
     try {
-      // 在实际环境中，将使用API调用获取真实数据
-      // 这里使用模拟数据进行演示
-      
-      // 模拟API延迟
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 使用实际API获取数据
       
       // 获取健康状态
-      // const healthData = await getHealthStatus();
-      const healthData = getMockHealthStatus();
-      setHealthStatus(healthData);
+      try {
+        const healthData = await getHealthStatus();
+        setHealthStatus(healthData);
+        setLoading(prev => ({ ...prev, health: false }));
+      } catch (err) {
+        console.error('Error fetching health status:', err);
+        setHealthStatus(getMockHealthStatus()); // 失败时回退到模拟数据
+        setLoading(prev => ({ ...prev, health: false }));
+      }
       
       // 获取指标数据
-      // const metricsData = await getMetrics();
-      const metricsData = getMockMetrics();
-      setMetrics(metricsData);
+      try {
+        const metricsData = await getMetrics();
+        setMetrics(metricsData);
+        setLoading(prev => ({ ...prev, metrics: false }));
+      } catch (err) {
+        console.error('Error fetching metrics:', err);
+        setMetrics(getMockMetrics()); // 失败时回退到模拟数据
+        setLoading(prev => ({ ...prev, metrics: false }));
+      }
       
       // 获取告警数据
-      // const alertsData = await getAlerts();
-      const alertsData = getMockAlerts();
-      setAlerts(alertsData);
-      
-      // 模拟日志数据已经通过getMockLogs获取
+      try {
+        const alertsData = await getAlerts();
+        setAlerts(alertsData);
+        setLoading(prev => ({ ...prev, alerts: false }));
+      } catch (err) {
+        console.error('Error fetching alerts:', err);
+        setAlerts(getMockAlerts()); // 失败时回退到模拟数据
+        setLoading(prev => ({ ...prev, alerts: false }));
+      }
       
       setRefreshTime(new Date().toLocaleTimeString());
       setError(null);
     } catch (err) {
       console.error('Error fetching monitoring data:', err);
       setError('Failed to fetch monitoring data');
-    } finally {
+      
+      // 确保所有加载状态都设置为完成
       setLoading({
         health: false,
         metrics: false,
@@ -96,6 +109,22 @@ const MonitoringPage = () => {
 
   const handleRefresh = () => {
     fetchData();
+  };
+
+  const handleConfigUpdate = () => {
+    // 当配置更新后，重新获取告警数据
+    setLoading(prev => ({ ...prev, alerts: true }));
+    getAlerts()
+      .then(alertsData => {
+        setAlerts(alertsData);
+      })
+      .catch(err => {
+        console.error('Error fetching alerts after config update:', err);
+        setAlerts(getMockAlerts());
+      })
+      .finally(() => {
+        setLoading(prev => ({ ...prev, alerts: false }));
+      });
   };
 
   return (
@@ -160,16 +189,20 @@ const MonitoringPage = () => {
         </TabsContent>
 
         <TabsContent value="alerts" className="space-y-4">
-          <AlertsPanel 
-            alerts={alerts} 
-            loading={loading.alerts} 
-          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <AlertsPanel 
+              alerts={alerts} 
+              loading={loading.alerts} 
+            />
+            <AlertConfigPanel 
+              onConfigUpdate={handleConfigUpdate}
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="logs" className="space-y-4">
           <LogsPanel 
-            logs={logs} 
-            loading={loading.logs} 
+            loading={false} 
             onRefresh={handleRefresh} 
           />
         </TabsContent>
